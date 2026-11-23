@@ -1,0 +1,3565 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1">
+<title>Ledgerline — Personal Finance Dashboard</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600;9..144,700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<!-- XLSX and Chart.js are loaded dynamically with multi-CDN fallback — see loadExternalLibraries() below -->
+<script>
+/* ===================== CLOUD SYNC SETTINGS =====================
+   Leave this as null to use the dashboard on this device only.
+   To share one set of data between phone and laptop, paste your Firebase web
+   config here, for example:
+   window.FIREBASE_CONFIG = { apiKey:"...", authDomain:"...", projectId:"...", storageBucket:"...", messagingSenderId:"...", appId:"..." };
+   (This config is not a secret — your data is protected by your login + the database rules.)
+   ================================================================ */
+window.FIREBASE_CONFIG = {
+  apiKey: "AIzaSyBVHi0cRaL1rdYpSTkCq4722OrU99Jd-rY",
+  authDomain: "personal-finance-dashboa-d3cba.firebaseapp.com",
+  projectId: "personal-finance-dashboa-d3cba",
+  storageBucket: "personal-finance-dashboa-d3cba.firebasestorage.app",
+  messagingSenderId: "686622798316",
+  appId: "1:686622798316:web:6b25f0bdecfafd2cc850c9"
+};
+
+window.__LEDGERLINE_LIB_STATUS = { xlsx:false, chart:false, firebase:false };
+function __loadScriptWithFallback(urls, testFn){
+  return new Promise(function(resolve, reject){
+    var i = 0;
+    function tryNext(){
+      if (testFn && testFn()){ resolve(true); return; }
+      if (i >= urls.length){ reject(new Error("all sources failed")); return; }
+      var url = urls[i++];
+      var s = document.createElement("script");
+      s.src = url;
+      s.async = false;
+      s.onload = function(){
+        if (!testFn || testFn()) resolve(true);
+        else tryNext();
+      };
+      s.onerror = function(){ tryNext(); };
+      document.head.appendChild(s);
+    }
+    tryNext();
+  });
+}
+window.__loadExternalLibraries = function(){
+  var xlsxPromise = __loadScriptWithFallback([
+    "https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js",
+    "https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js",
+    "https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js",
+    "https://unpkg.com/xlsx@0.18.5/dist/xlsx.full.min.js"
+  ], function(){ return typeof XLSX !== "undefined"; }).then(function(){ window.__LEDGERLINE_LIB_STATUS.xlsx = true; }).catch(function(){ window.__LEDGERLINE_LIB_STATUS.xlsx = false; });
+
+  var chartPromise = __loadScriptWithFallback([
+    "https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js",
+    "https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.4/chart.umd.min.js",
+    "https://unpkg.com/chart.js@4.4.4/dist/chart.umd.min.js"
+  ], function(){ return typeof Chart !== "undefined"; }).then(function(){ window.__LEDGERLINE_LIB_STATUS.chart = true; }).catch(function(){ window.__LEDGERLINE_LIB_STATUS.chart = false; });
+
+  var fbPromise = Promise.resolve();
+  if (window.FIREBASE_CONFIG){
+    var fbBase = "https://www.gstatic.com/firebasejs/10.12.2/";
+    fbPromise = __loadScriptWithFallback([fbBase + "firebase-app-compat.js"], function(){ return typeof firebase !== "undefined" && !!firebase.initializeApp; })
+      .then(function(){
+        return Promise.all([
+          __loadScriptWithFallback([fbBase + "firebase-auth-compat.js"], function(){ return typeof firebase.auth === "function"; }),
+          __loadScriptWithFallback([fbBase + "firebase-firestore-compat.js"], function(){ return typeof firebase.firestore === "function"; })
+        ]);
+      })
+      .then(function(){ window.__LEDGERLINE_LIB_STATUS.firebase = true; })
+      .catch(function(){ window.__LEDGERLINE_LIB_STATUS.firebase = false; });
+  }
+
+  return Promise.all([xlsxPromise, chartPromise, fbPromise]);
+};
+</script>
+<style>
+/* ============================= TOKENS ============================= */
+:root{
+  --bg: #EEF0EA;
+  --surface: #FFFFFF;
+  --surface-2: #F5F6F0;
+  --ink: #1A2420;
+  --ink-muted: #5C6961;
+  --ink-faint: #8B968E;
+  --line: #DCE1D7;
+  --line-strong:#C7CEC0;
+  --brand: #2E6F5E;
+  --brand-ink: #FFFFFF;
+  --brand-soft: rgba(46,111,94,0.10);
+  --gold: #B9862F;
+  --gold-soft: rgba(185,134,47,0.12);
+  --positive: #2E6F5E;
+  --positive-soft: rgba(46,111,94,0.12);
+  --negative: #AD4A32;
+  --negative-soft: rgba(173,74,50,0.11);
+  --shadow: 0 1px 2px rgba(20,30,25,0.04);
+  --radius: 10px;
+  --radius-sm: 7px;
+  --font-display: 'Fraunces', serif;
+  --font-body: 'Inter', system-ui, sans-serif;
+}
+html[data-theme="dark"]{
+  --bg: #10140F;
+  --surface: #171D16;
+  --surface-2: #1C2319;
+  --ink: #E9ECE3;
+  --ink-muted: #A2AC9A;
+  --ink-faint: #6D766A;
+  --line: #2B332A;
+  --line-strong:#3A4438;
+  --brand: #5FB79B;
+  --brand-ink: #0C1710;
+  --brand-soft: rgba(95,183,155,0.14);
+  --gold: #E0B45A;
+  --gold-soft: rgba(224,180,90,0.14);
+  --positive: #5FB79B;
+  --positive-soft: rgba(95,183,155,0.14);
+  --negative: #E08161;
+  --negative-soft: rgba(224,129,97,0.14);
+  --shadow: 0 1px 2px rgba(0,0,0,0.25);
+}
+
+*{ box-sizing:border-box; }
+html,body{ margin:0; padding:0; }
+body{
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--font-body);
+  font-size: 14px;
+  line-height:1.5;
+  -webkit-font-smoothing: antialiased;
+  min-height:100vh;
+}
+::selection{ background: var(--brand-soft); }
+h1,h2,h3,h4{ font-family: var(--font-display); font-weight:600; margin:0; color: var(--ink); }
+button{ font-family: inherit; }
+.tabular{ font-variant-numeric: tabular-nums; font-feature-settings: "tnum" 1; }
+a{ color: inherit; }
+::-webkit-scrollbar{ width:10px; height:10px; }
+::-webkit-scrollbar-thumb{ background: var(--line-strong); border-radius:6px; }
+::-webkit-scrollbar-track{ background: transparent; }
+
+.visually-hidden{ position:absolute; width:1px; height:1px; overflow:hidden; clip:rect(0 0 0 0); white-space:nowrap; }
+
+/* ============================= WELCOME ============================= */
+#welcome{
+  min-height:100vh;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  padding: 32px 20px;
+  background:
+    radial-gradient(ellipse 900px 500px at 15% -10%, var(--brand-soft), transparent 60%),
+    radial-gradient(ellipse 700px 500px at 100% 110%, var(--gold-soft), transparent 55%),
+    var(--bg);
+}
+.welcome-card{ max-width: 620px; width:100%; text-align:left; }
+.welcome-mark{
+  display:inline-flex; align-items:center; gap:10px; margin-bottom:38px;
+}
+.welcome-mark .mark-glyph{
+  width:34px; height:34px; border-radius:8px; background:var(--brand); color:var(--brand-ink);
+  display:flex; align-items:center; justify-content:center; font-family:var(--font-display); font-weight:700; font-size:17px;
+}
+.welcome-mark span{ font-family:var(--font-display); font-size:19px; font-weight:600; letter-spacing:0.01em; }
+.welcome-card h1{ font-size: 42px; line-height:1.12; letter-spacing:-0.01em; max-width: 12ch; }
+.welcome-card p.sub{
+  margin-top:16px; font-size:16px; color: var(--ink-muted); max-width: 46ch; line-height:1.6;
+}
+.welcome-actions{ margin-top:34px; display:flex; align-items:center; gap:16px; flex-wrap:wrap; }
+.btn{
+  display:inline-flex; align-items:center; gap:8px;
+  border-radius: var(--radius-sm);
+  border:1px solid transparent;
+  padding: 11px 18px;
+  font-size:13.5px; font-weight:600; cursor:pointer;
+  transition: transform .12s ease, background .15s ease, border-color .15s ease;
+  white-space:nowrap;
+}
+.btn:active{ transform: translateY(1px); }
+.btn-primary{ background: var(--brand); color: var(--brand-ink); }
+.btn-primary:hover{ filter:brightness(1.06); }
+.btn-ghost{ background: transparent; color: var(--ink); border-color: var(--line-strong); }
+.btn-ghost:hover{ background: var(--surface-2); }
+.btn-danger-ghost{ background: transparent; color: var(--negative); border-color: var(--negative); }
+.btn-danger-ghost:hover{ background: var(--negative-soft); }
+.btn-sm{ padding:7px 12px; font-size:12.5px; }
+.btn svg{ width:15px; height:15px; flex-shrink:0; }
+.welcome-note{
+  margin-top:28px; font-size:12.5px; color: var(--ink-faint); display:flex; gap:8px; align-items:flex-start; max-width:44ch;
+}
+.welcome-note svg{ width:15px; height:15px; flex-shrink:0; margin-top:1px; }
+.welcome-status{ margin-top:22px; font-size:13px; color:var(--brand); font-weight:600; min-height:18px; }
+.welcome-error{ margin-top:22px; font-size:13px; color:var(--negative); font-weight:600; max-width:48ch; }
+
+/* ============================= APP SHELL ============================= */
+#app{ display:none; min-height:100vh; }
+#app.active{ display:block; }
+.topbar{
+  position:sticky; top:0; z-index:40;
+  background: var(--surface);
+  border-bottom:1px solid var(--line);
+  padding: 12px 22px;
+  display:flex; align-items:center; gap:14px;
+}
+.brand{ display:flex; align-items:center; gap:9px; margin-right:6px; }
+.brand .mark-glyph{
+  width:27px; height:27px; border-radius:7px; background:var(--brand); color:var(--brand-ink);
+  display:flex; align-items:center; justify-content:center; font-family:var(--font-display); font-weight:700; font-size:14px;
+}
+.brand span{ font-family:var(--font-display); font-size:16.5px; font-weight:600; }
+.topbar-spacer{ flex:1; }
+.topbar-meta{
+  font-size:12px; color:var(--ink-faint); display:flex; align-items:center; gap:6px; margin-right:6px;
+}
+.topbar-meta strong{ color:var(--ink-muted); font-weight:600; }
+.icon-btn{
+  width:34px; height:34px; border-radius:8px; border:1px solid var(--line-strong);
+  background: transparent; color:var(--ink-muted); display:flex; align-items:center; justify-content:center; cursor:pointer;
+}
+.icon-btn:hover{ background: var(--surface-2); color:var(--ink); }
+.icon-btn svg{ width:16px; height:16px; }
+.select{
+  border:1px solid var(--line-strong); background: var(--surface); color:var(--ink);
+  border-radius:8px; padding:7px 10px; font-size:12.5px; font-weight:600; cursor:pointer;
+}
+
+main{ max-width:1360px; margin:0 auto; padding: 26px 22px 80px; }
+
+/* ============================= FILTER BAR ============================= */
+.filterbar{
+  position:sticky; top:57px; z-index:30;
+  background: var(--bg);
+  padding: 16px 0 14px;
+  margin-bottom: 6px;
+}
+.filterbar-inner{
+  background: var(--surface); border:1px solid var(--line); border-radius: var(--radius);
+  padding: 14px 16px; box-shadow: var(--shadow);
+}
+.year-row{ display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
+.pill{
+  border:1px solid var(--line-strong); background:transparent; color:var(--ink-muted);
+  padding: 7px 14px; border-radius: 999px; font-size:12.5px; font-weight:600; cursor:pointer;
+  white-space:nowrap;
+}
+.pill:hover{ border-color: var(--brand); color:var(--ink); }
+.pill.active{ background: var(--ink); border-color: var(--ink); color: var(--bg); }
+html[data-theme="dark"] .pill.active{ background: var(--brand); border-color:var(--brand); color:var(--brand-ink); }
+.pill-sep{ width:1px; align-self:stretch; background:var(--line); margin:0 4px; }
+.month-row{
+  display:flex; align-items:center; gap:6px; flex-wrap:wrap;
+  margin-top:12px; padding-top:12px; border-top:1px dashed var(--line);
+}
+.month-row.hidden{ display:none; }
+.mpill{
+  border:1px solid transparent; background: var(--surface-2); color:var(--ink-muted);
+  padding: 6px 11px; border-radius:7px; font-size:12px; font-weight:600; cursor:pointer;
+}
+.mpill:hover{ color:var(--ink); border-color:var(--line-strong); }
+.mpill.active{ background: var(--brand-soft); color: var(--brand); border-color: var(--brand); }
+.mpill.empty{ opacity:.35; cursor:default; }
+.mpill.empty:hover{ border-color:transparent; color:var(--ink-muted); }
+
+/* ============================= SECTIONS ============================= */
+.section{ margin-top: 30px; }
+.section-head{ display:flex; align-items:baseline; justify-content:space-between; margin-bottom:14px; gap:12px; flex-wrap:wrap; }
+.section-head h2{ font-size:19px; }
+.section-head .section-sub{ font-size:12.5px; color:var(--ink-faint); }
+.section-actions{ display:flex; gap:8px; align-items:center; }
+
+/* KPI */
+.kpi-grid{ display:grid; grid-template-columns: repeat(6, 1fr); gap:12px; }
+.kpi-card{
+  background: var(--surface); border:1px solid var(--line); border-radius: var(--radius);
+  padding: 16px 16px 15px; box-shadow: var(--shadow); position:relative; overflow:hidden;
+}
+.kpi-label{ font-size:11.5px; color:var(--ink-faint); font-weight:600; letter-spacing:0.01em; }
+.kpi-value{ font-family:var(--font-display); font-size:24px; margin-top:8px; line-height:1.1; }
+.kpi-value.pos{ color: var(--positive); }
+.kpi-value.neg{ color: var(--negative); }
+.kpi-foot{ font-size:11.5px; color:var(--ink-faint); margin-top:7px; }
+.kpi-delta{ font-weight:700; }
+.kpi-delta.pos{ color:var(--positive); }
+.kpi-delta.neg{ color:var(--negative); }
+.kpi-card.accent::before{
+  content:""; position:absolute; left:0; top:0; bottom:0; width:3px; background:var(--brand);
+}
+
+/* Charts */
+.chart-grid{ display:grid; grid-template-columns: 1.3fr 1fr; gap:14px; }
+.chart-grid.tri{ grid-template-columns: 1fr 1fr; }
+.card{
+  background: var(--surface); border:1px solid var(--line); border-radius: var(--radius);
+  padding: 18px 18px 14px; box-shadow: var(--shadow);
+}
+.card-title{ font-size:14px; font-weight:600; font-family:var(--font-body); color:var(--ink); }
+.card-title-row{ display:flex; align-items:center; justify-content:space-between; margin-bottom:12px; }
+.card-caption{ font-size:11.5px; color:var(--ink-faint); }
+.chart-wrap{ position:relative; height:260px; }
+.chart-wrap.short{ height:210px; }
+.empty-chart-msg{
+  position:absolute; inset:0; display:flex; align-items:center; justify-content:center;
+  color:var(--ink-faint); font-size:12.5px; text-align:center; padding:20px;
+}
+
+/* Accounts */
+.accounts-grid{ display:grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap:12px; }
+.account-card{
+  background: var(--surface); border:1px solid var(--line); border-radius: var(--radius);
+  padding: 14px 15px; box-shadow: var(--shadow);
+}
+.account-name{ font-size:12.5px; font-weight:600; color:var(--ink-muted); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.account-balance{ font-family:var(--font-display); font-size:19px; margin-top:6px; }
+.account-bar{ height:4px; border-radius:3px; background:var(--surface-2); margin-top:11px; overflow:hidden; }
+.account-bar > i{ display:block; height:100%; background:var(--brand); border-radius:3px; }
+.account-foot{ display:flex; justify-content:space-between; margin-top:7px; font-size:11px; color:var(--ink-faint); }
+.account-card.total{ background: var(--ink); color: var(--bg); }
+html[data-theme="dark"] .account-card.total{ background: var(--brand); color:var(--brand-ink); }
+.account-card.total .account-name{ color: inherit; opacity:.7; }
+.account-card.total .account-bar{ display:none; }
+.account-card.negative .account-balance{ color: var(--negative); }
+.accounts-note{ font-size:11.5px; color:var(--ink-faint); margin-top:12px; }
+
+/* Categories */
+.category-list{ display:flex; flex-direction:column; }
+.category-row{
+  display:grid; grid-template-columns: 1fr auto auto auto; align-items:center; gap:14px;
+  padding: 10px 2px; border-bottom:1px solid var(--line);
+}
+.category-row:last-child{ border-bottom:none; }
+.category-name-wrap{ display:flex; align-items:center; gap:9px; min-width:0; }
+.cat-dot{ width:9px; height:9px; border-radius:50%; flex-shrink:0; }
+.category-name{ font-size:13px; font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.category-amt{ font-weight:600; font-size:13px; text-align:right; min-width:100px; }
+.category-pct{ font-size:12px; color:var(--ink-muted); text-align:right; min-width:48px; }
+.category-count{ font-size:11.5px; color:var(--ink-faint); text-align:right; min-width:70px; }
+.cat-bg-bar{ grid-column:1/-1; height:3px; background:var(--surface-2); border-radius:2px; margin-top:-4px; overflow:hidden;}
+.cat-bg-bar > i{ display:block; height:100%; border-radius:2px; }
+
+/* Insights */
+.insights-grid{ display:grid; grid-template-columns: 2fr 1fr; gap:14px; }
+.insight-stat{ display:flex; justify-content:space-between; padding:9px 0; border-bottom:1px dashed var(--line); font-size:13px; }
+.insight-stat:last-child{ border-bottom:none; }
+.insight-stat .lbl{ color:var(--ink-muted); }
+.insight-stat .val{ font-weight:600; }
+.compare-row{ display:flex; flex-direction:column; gap:12px; }
+.compare-item{ display:flex; align-items:center; justify-content:space-between; }
+.compare-item .lbl{ font-size:12.5px; color:var(--ink-muted); }
+
+/* Page title */
+.page-title-row{ margin-bottom:4px; }
+.page-title{ font-size:26px; letter-spacing:-0.01em; }
+.page-subtitle{ font-size:12.8px; color:var(--ink-faint); margin:6px 0 0; }
+
+/* Filter bar extras */
+.range-row{ display:flex; align-items:center; gap:8px; flex-wrap:wrap; margin-top:12px; padding-top:12px; border-top:1px dashed var(--line); }
+.range-label{ font-size:11.5px; font-weight:700; color:var(--ink-faint); letter-spacing:.02em; margin-right:2px; }
+.date-input{ padding:6px 8px; font-size:12px; font-weight:500; cursor:pointer; }
+.range-to{ font-size:12px; color:var(--ink-faint); }
+.filter-hint{ font-size:11px; color:var(--ink-faint); margin:10px 2px 0; }
+
+/* KPI icons + trend */
+.kpi-top{ display:flex; align-items:flex-start; justify-content:space-between; }
+.kpi-icon{ width:30px; height:30px; border-radius:8px; display:flex; align-items:center; justify-content:center; flex-shrink:0; }
+.kpi-icon svg{ width:16px; height:16px; }
+.kpi-icon.i-income{ background:var(--positive-soft); color:var(--positive); }
+.kpi-icon.i-expense{ background:var(--negative-soft); color:var(--negative); }
+.kpi-icon.i-net{ background:var(--gold-soft); color:var(--gold); }
+.kpi-icon.i-assets{ background:var(--brand-soft); color:var(--brand); }
+.kpi-icon.i-savings{ background:var(--gold-soft); color:var(--gold); }
+.kpi-icon.i-txn{ background:var(--surface-2); color:var(--ink-muted); }
+.kpi-trend{ display:inline-flex; align-items:center; gap:3px; font-size:11.5px; font-weight:700; padding:3px 7px; border-radius:6px; }
+.kpi-trend.pos{ color:var(--positive); background:var(--positive-soft); }
+.kpi-trend.neg{ color:var(--negative); background:var(--negative-soft); }
+.kpi-trend.flat{ color:var(--ink-faint); background:var(--surface-2); }
+.kpi-trend svg{ width:11px; height:11px; }
+
+/* Financial insights list */
+.insights-list{ list-style:none; margin:0; padding:0; display:flex; flex-direction:column; gap:2px; }
+.insights-list li{ display:flex; gap:11px; align-items:flex-start; padding:11px 2px; border-bottom:1px solid var(--line); font-size:13.2px; line-height:1.5; }
+.insights-list li:last-child{ border-bottom:none; }
+.insights-list .insight-dot{ width:7px; height:7px; border-radius:50%; background:var(--brand); margin-top:6px; flex-shrink:0; }
+
+/* Month on month comparison */
+.mom-grid{ display:grid; grid-template-columns: repeat(3, 1fr); gap:16px; }
+.mom-block{ padding:14px; border:1px solid var(--line); border-radius: var(--radius-sm); }
+.mom-block h4{ font-family:var(--font-body); font-size:11.5px; font-weight:700; color:var(--ink-faint); letter-spacing:.02em; margin:0 0 12px; text-transform:uppercase; }
+.mom-line{ display:flex; justify-content:space-between; font-size:12.8px; padding:5px 0; }
+.mom-line .lbl{ color:var(--ink-muted); }
+.mom-line .val{ font-weight:600; }
+.mom-change{ margin-top:9px; padding-top:9px; border-top:1px dashed var(--line); display:flex; justify-content:space-between; align-items:center; }
+
+.trend-note{ font-size:12px; color:var(--ink-faint); margin:12px 2px 2px; }
+
+/* Year-over-year category matrix */
+.matrix-scroll{ overflow-x:auto; border:1px solid var(--line); border-radius: var(--radius-sm); max-height:520px; }
+table.matrix-table{ width:100%; border-collapse:collapse; font-size:12.3px; }
+table.matrix-table th, table.matrix-table td{ padding:8px 10px; white-space:nowrap; text-align:right; border-bottom:1px solid var(--line); border-right:1px solid var(--line); }
+table.matrix-table thead th{ background:var(--brand); color:var(--brand-ink); font-weight:700; font-size:11px; letter-spacing:.01em; position:sticky; top:0; z-index:2; }
+table.matrix-table th:first-child, table.matrix-table td:first-child{ position:sticky; left:0; text-align:left; z-index:1; background:var(--surface); }
+table.matrix-table thead th:first-child{ z-index:3; background:var(--brand); }
+table.matrix-table tbody td:first-child{ font-weight:700; color:var(--ink); }
+table.matrix-table tbody tr:nth-child(even) td{ background:var(--surface-2); }
+table.matrix-table tbody tr:hover td{ filter:brightness(0.97); }
+table.matrix-table .pct-cell{ font-style:italic; font-size:11.3px; color:var(--ink-faint); }
+table.matrix-table .pct-cell.pos{ color:var(--positive); font-weight:600; }
+table.matrix-table .pct-cell.neg{ color:var(--negative); font-weight:600; }
+table.matrix-table .pct-col{ font-weight:400; }
+table.matrix-table .grand-total-col{ font-weight:700; }
+table.matrix-table tr.grand-total-row td{ background:var(--ink); color:var(--bg); font-weight:700; position:sticky; bottom:0; z-index:1; border-right:1px solid rgba(255,255,255,0.15); }
+html[data-theme="dark"] table.matrix-table tr.grand-total-row td{ background:var(--brand); color:var(--brand-ink); }
+table.matrix-table tr.grand-total-row td:first-child{ z-index:2; }
+.matrix-caption{ font-size:11.5px; color:var(--ink-faint); margin:10px 2px 0; }
+
+/* Yearly category matrix (multi-year trend report) */
+.matrix-scroll{ overflow-x:auto; border:1px solid var(--line); border-radius: var(--radius); }
+table.matrix-table{ width:100%; border-collapse:collapse; font-size:12px; min-width:820px; }
+table.matrix-table th{
+  background:#16233F; color:#EDEFF5; font-weight:700; padding:10px 11px; text-align:right; white-space:nowrap;
+  position:sticky; top:0; font-size:10.8px; letter-spacing:.01em; border-bottom:1px solid #0E1830;
+}
+table.matrix-table th:first-child{ text-align:left; position:sticky; left:0; z-index:3; background:#16233F; }
+table.matrix-table th.pct-col{ font-weight:600; opacity:.8; font-size:10px; }
+table.matrix-table td{ padding:7px 11px; text-align:right; border-bottom:1px solid var(--line); white-space:nowrap; color:var(--ink); }
+table.matrix-table td:first-child{ text-align:left; font-weight:600; position:sticky; left:0; background:var(--surface); z-index:1; }
+table.matrix-table td.pct-cell{ font-style:italic; font-size:10.8px; color:var(--ink-faint); }
+table.matrix-table td.pct-cell.pos{ color:var(--positive); }
+table.matrix-table td.pct-cell.neg{ color:var(--negative); }
+table.matrix-table td.grand-total-col{ font-weight:700; }
+table.matrix-table tr.grand-total-row td{ background:#16233F !important; color:#EDEFF5; font-weight:700; border-bottom:none; font-style:normal; }
+table.matrix-table tbody tr:not(.grand-total-row):hover td{ background: var(--surface-2); }
+.matrix-caption{ font-size:11.5px; color:var(--ink-faint); margin:10px 2px 0; }
+
+/* Transactions */
+.txn-toolbar{ display:flex; gap:9px; flex-wrap:wrap; align-items:center; margin-bottom:14px; }
+.search-input{
+  flex:1; min-width:180px; border:1px solid var(--line-strong); background:var(--surface);
+  color:var(--ink); border-radius:8px; padding:9px 12px 9px 34px; font-size:13px;
+  background-repeat:no-repeat; background-position: 11px center; background-size:14px;
+}
+.search-wrap{ position:relative; flex:1; min-width:200px; display:flex; align-items:center; }
+.search-wrap svg{ position:absolute; left:11px; width:14px; height:14px; color:var(--ink-faint); pointer-events:none; }
+.search-wrap input{ width:100%; }
+
+.table-scroll{ overflow-x:auto; border:1px solid var(--line); border-radius: var(--radius); background:var(--surface); }
+table.txn-table{ width:100%; border-collapse:collapse; font-size:12.8px; min-width:760px; }
+table.txn-table th{
+  text-align:left; padding:11px 14px; background:var(--surface-2); color:var(--ink-muted);
+  font-weight:600; font-size:11.5px; letter-spacing:.01em; cursor:pointer; white-space:nowrap;
+  position:sticky; top:0; border-bottom:1px solid var(--line);
+}
+table.txn-table th:hover{ color:var(--ink); }
+table.txn-table th .sort-arrow{ margin-left:4px; opacity:.5; font-size:10px; }
+table.txn-table td{ padding:10px 14px; border-bottom:1px solid var(--line); vertical-align:top; }
+table.txn-table tbody tr:hover{ background: var(--surface-2); }
+table.txn-table tbody tr:last-child td{ border-bottom:none; }
+.type-tag{ display:inline-block; padding:2px 8px; border-radius:5px; font-size:10.5px; font-weight:700; letter-spacing:.02em; }
+.type-tag.Income{ background:var(--positive-soft); color:var(--positive); }
+.type-tag.Expense{ background:var(--negative-soft); color:var(--negative); }
+.type-tag.Transfer{ background:var(--gold-soft); color:var(--gold); }
+.amt-in{ color:var(--positive); font-weight:600; }
+.amt-out{ color:var(--negative); font-weight:600; }
+.muted-cell{ color:var(--ink-faint); }
+.desc-cell{ max-width:220px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+
+.txn-cards{ display:none; }
+.txn-card{
+  background:var(--surface); border:1px solid var(--line); border-radius:var(--radius-sm);
+  padding:13px 14px; margin-bottom:10px;
+}
+.txn-card-top{ display:flex; justify-content:space-between; align-items:flex-start; gap:10px; }
+.txn-card-desc{ font-weight:600; font-size:13px; margin-top:6px; }
+.txn-card-meta{ font-size:11.5px; color:var(--ink-faint); margin-top:5px; display:flex; gap:8px; flex-wrap:wrap; }
+.txn-card-balance{ font-size:11.5px; color:var(--ink-muted); margin-top:7px; padding-top:7px; border-top:1px dashed var(--line); font-weight:600; }
+.row-actions{ display:flex; gap:5px; white-space:nowrap; }
+.row-action-btn{
+  width:26px; height:26px; border-radius:6px; border:1px solid var(--line-strong); background:transparent;
+  color:var(--ink-muted); display:inline-flex; align-items:center; justify-content:center; cursor:pointer; padding:0;
+}
+.row-action-btn:hover{ background:var(--surface-2); color:var(--ink); }
+.row-action-btn.danger:hover{ background:var(--negative-soft); color:var(--negative); border-color:var(--negative); }
+.row-action-btn svg{ width:13px; height:13px; }
+.txn-card-actions{ display:flex; gap:8px; margin-top:9px; padding-top:9px; border-top:1px dashed var(--line); }
+.txn-card-actions .row-action-btn{ width:auto; padding:5px 10px; gap:5px; font-size:11px; font-weight:600; }
+.edited-dot{ display:inline-block; width:6px; height:6px; border-radius:50%; background:var(--gold); margin-left:6px; vertical-align:middle; }
+.edited-dot[title]{ cursor:help; }
+.balance-cell{ font-weight:600; color:var(--ink); }
+.txn-card-amt{ font-weight:700; font-size:14px; white-space:nowrap; }
+
+.pagination{ display:flex; align-items:center; justify-content:space-between; margin-top:14px; gap:10px; flex-wrap:wrap; }
+.pagination .pg-info{ font-size:12px; color:var(--ink-faint); }
+.pg-btns{ display:flex; gap:6px; }
+.pg-btn{
+  width:30px; height:30px; border-radius:7px; border:1px solid var(--line-strong); background:var(--surface);
+  color:var(--ink); cursor:pointer; font-size:12px; display:flex; align-items:center; justify-content:center;
+}
+.pg-btn:disabled{ opacity:.35; cursor:default; }
+.pg-btn:not(:disabled):hover{ background:var(--surface-2); }
+
+/* Empty / validation */
+.banner{
+  display:flex; gap:10px; align-items:flex-start; padding:12px 14px; border-radius: var(--radius-sm);
+  font-size:12.8px; margin-bottom:16px; border:1px solid;
+}
+.banner svg{ width:16px; height:16px; flex-shrink:0; margin-top:1px; }
+.banner.warn{ background: var(--gold-soft); border-color: var(--gold); color:var(--ink); }
+.banner.error{ background: var(--negative-soft); border-color: var(--negative); color:var(--ink); }
+.banner .close-banner{ margin-left:auto; cursor:pointer; opacity:.6; background:none; border:none; color:inherit; }
+.banner .close-banner:hover{ opacity:1; }
+
+footer.app-footer{
+  max-width:1360px; margin:0 auto; padding: 10px 22px 40px; display:flex; justify-content:space-between;
+  font-size:11.5px; color:var(--ink-faint); flex-wrap:wrap; gap:8px;
+}
+
+/* Toast */
+#toastHost{ position:fixed; bottom:92px; right:20px; z-index:100; display:flex; flex-direction:column; gap:8px; }
+.toast{
+  background: var(--ink); color: var(--bg); padding:11px 16px; border-radius:8px; font-size:12.8px; font-weight:600;
+  box-shadow:0 6px 18px rgba(0,0,0,.18); max-width:320px; opacity:0; transform:translateY(6px); transition: all .25s ease;
+}
+.toast.show{ opacity:1; transform:translateY(0); }
+
+/* Modal */
+.modal-overlay{
+  position:fixed; inset:0; background:rgba(10,15,10,.45); display:none; align-items:center; justify-content:center; z-index:90; padding:20px;
+}
+.modal-overlay.show{ display:flex; }
+.modal{
+  background: var(--surface); border-radius: var(--radius); padding:22px; max-width:380px; width:100%;
+  box-shadow: 0 20px 50px rgba(0,0,0,.25);
+}
+.modal h3{ font-size:16px; margin-bottom:9px; }
+.modal p{ font-size:13px; color:var(--ink-muted); margin:0 0 18px; line-height:1.6; }
+.modal .modal-actions{ display:flex; gap:10px; justify-content:flex-end; }
+.modal.modal-wide{ max-width:560px; }
+.modal-note{ font-size:11.8px; color:var(--ink-faint); background:var(--surface-2); border-radius:7px; padding:9px 11px; margin:0 0 14px; line-height:1.5; }
+.modal-error{ font-size:12.5px; color:var(--negative); margin:0 0 12px; }
+.form-grid{ display:grid; grid-template-columns:1fr 1fr; gap:12px; margin-bottom:4px; }
+.form-field{ display:flex; flex-direction:column; gap:5px; font-size:11.5px; font-weight:600; color:var(--ink-muted); }
+.form-field-wide{ grid-column:1/-1; }
+.form-field input, .form-field select{
+  border:1px solid var(--line-strong); background:var(--surface); color:var(--ink);
+  border-radius:7px; padding:8px 10px; font-size:13px; font-weight:500; font-family:inherit;
+}
+.form-field input:focus, .form-field select:focus{ outline:2px solid var(--brand); outline-offset:1px; }
+
+/* Add-transaction button + form */
+.fab{
+  position:fixed; right:20px; bottom:20px; z-index:60; width:58px; height:58px; border-radius:50%;
+  border:none; background:var(--brand); color:var(--brand-ink); font-size:32px; line-height:1; cursor:pointer;
+  box-shadow:0 6px 18px rgba(0,0,0,.28); display:flex; align-items:center; justify-content:center; padding:0 0 3px;
+}
+.fab:hover{ filter:brightness(1.07); }
+.fab:active{ transform:scale(.96); }
+.seg{ display:flex; border:1px solid var(--line-strong); border-radius:9px; overflow:hidden; margin-bottom:14px; }
+.seg button{
+  flex:1; padding:11px 6px; border:none; background:transparent; color:var(--ink-muted);
+  font-size:14px; font-weight:600; cursor:pointer; font-family:inherit;
+}
+.seg button + button{ border-left:1px solid var(--line-strong); }
+.seg button.active{ background:var(--brand); color:var(--brand-ink); }
+.add-actions{ display:flex; gap:10px; justify-content:flex-end; flex-wrap:wrap; }
+.auth-box{ max-width:360px; margin-top:26px; display:flex; flex-direction:column; gap:12px; }
+.auth-box .welcome-actions{ margin-top:6px; }
+.combo-wrap{ position:relative; }
+.combo-wrap > input{
+  width:100%; padding-right:32px;
+  background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%238B968E' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+  background-repeat:no-repeat; background-position:right 10px center; background-size:16px;
+}
+.combo-list{
+  display:none; position:absolute; left:0; right:0; top:100%; margin-top:4px; max-height:260px; overflow-y:auto;
+  -webkit-overflow-scrolling:touch; overscroll-behavior:contain;
+  background:var(--surface); border:1px solid var(--line-strong); border-radius:9px;
+  box-shadow:0 10px 28px rgba(0,0,0,.24); z-index:30;
+}
+.combo-list.open{ display:block; }
+.combo-list.up{ top:auto; bottom:100%; margin-top:0; margin-bottom:4px; }
+.combo-item{ padding:10px 12px; font-size:13.5px; font-weight:500; color:var(--ink); cursor:pointer; border-bottom:1px solid var(--line); }
+.combo-item:last-child{ border-bottom:none; }
+.combo-item:hover, .combo-item.active{ background:var(--brand-soft); }
+.combo-item.current{ font-weight:700; color:var(--brand); }
+.combo-item.new{ color:var(--brand); font-weight:600; }
+.combo-empty{ padding:12px; font-size:12.5px; color:var(--ink-faint); }
+.welcome-link{ color:var(--brand); font-weight:600; text-decoration:underline; cursor:pointer; margin-left:6px; }
+
+
+/* Loading overlay */
+#loadingOverlay{
+  position:fixed; inset:0; background: rgba(10,15,10,.55); z-index:120; display:none; align-items:center; justify-content:center; flex-direction:column; gap:14px;
+}
+#loadingOverlay.show{ display:flex; }
+.spinner{ width:34px; height:34px; border-radius:50%; border:3px solid rgba(255,255,255,.25); border-top-color:#fff; animation: spin .8s linear infinite; }
+@keyframes spin{ to{ transform: rotate(360deg); } }
+#loadingOverlay span{ color:#fff; font-size:13px; font-weight:600; }
+
+/* Responsive */
+@media (max-width: 1080px){
+  .kpi-grid{ grid-template-columns: repeat(3, 1fr); }
+  .chart-grid, .chart-grid.tri{ grid-template-columns: 1fr; }
+  .insights-grid{ grid-template-columns: 1fr; }
+  .mom-grid{ grid-template-columns: 1fr; }
+}
+@media (max-width: 720px){
+  .kpi-grid{ grid-template-columns: repeat(2, 1fr); }
+  main{ padding: 18px 14px 70px; }
+  .topbar{ padding: 10px 14px; flex-wrap:wrap; }
+  .topbar-meta{ order:5; width:100%; margin-top:2px; }
+  .filterbar{ top:96px; }
+  /* Filters slide away while scrolling down and return only at the top of the page (see initMobileFilterAutoHide).
+     The bar stays in the page flow, so hiding it leaves no blank gap. */
+  .filterbar{
+    transition: transform .28s ease, opacity .22s ease, visibility 0s linear 0s;
+    will-change: transform;
+  }
+  .filterbar.is-hidden-mobile{
+    transform: translateY(-110%);
+    opacity:0;
+    visibility:hidden;
+    pointer-events:none;
+    transition: transform .28s ease, opacity .22s ease, visibility 0s linear .28s;
+  }
+  .welcome-card h1{ font-size:32px; }
+  table.txn-table{ display:none; }
+  .txn-cards{ display:block; }
+  .table-scroll{ border:none; background:none; }
+  .category-row{ grid-template-columns: 1fr auto; row-gap:4px; }
+  .category-count{ display:none; }
+  .range-row{ width:100%; }
+  .page-title{ font-size:21px; }
+}
+@media (max-width: 720px){
+  /* the add-transaction form becomes a full-screen sheet on phones */
+  #addTxnModal{ padding:0; align-items:stretch; }
+  #addTxnModal .modal{ max-width:100%; height:100%; border-radius:0; overflow-y:auto; padding:18px 16px 28px; }
+  .form-field input, .form-field select{ font-size:16px; padding:12px 12px; }  /* 16px stops iOS zooming on focus */
+  .form-grid{ grid-template-columns:1fr; }
+  .add-actions .btn{ flex:1; justify-content:center; padding:13px 14px; }
+  .fab{ right:16px; bottom:16px; }
+  .combo-item{ padding:14px 14px; font-size:16px; }
+  /* the edit form is taller than a phone screen — let it scroll so every field and dropdown is reachable */
+  #editTxnModal{ align-items:flex-start; overflow-y:auto; }
+  #editTxnModal .modal{ margin:auto; }
+  #toastHost{ right:12px; left:12px; bottom:84px; }
+}
+@media (max-width: 480px){
+  .kpi-grid{ grid-template-columns: 1fr 1fr; }
+  .welcome-actions{ flex-direction:column; align-items:stretch; }
+  .form-grid{ grid-template-columns: 1fr; }
+  .modal.modal-wide{ max-width:100%; }
+}
+
+/* Print */
+@media print{
+  .topbar, .filterbar, .txn-toolbar, .pagination, #toastHost, .btn, .section-actions, .icon-btn, .row-actions, .txn-card-actions, .fab{ display:none !important; }
+  body{ background:#fff; color:#000; }
+  .card, .kpi-card, .account-card{ box-shadow:none; border:1px solid #ccc; break-inside: avoid; }
+  main{ padding:0; max-width:100%; }
+  .chart-grid, .chart-grid.tri{ grid-template-columns: 1fr 1fr; }
+}
+</style>
+</head>
+<body>
+
+<!-- ============================= WELCOME SCREEN ============================= -->
+<div id="welcome">
+  <div class="welcome-card">
+    <div class="welcome-mark"><span class="mark-glyph">L</span><span>Ledgerline</span></div>
+    <h1>Your finances, read straight from your own workbook.</h1>
+    <p class="sub" id="welcomeSub">Upload your Excel workbook to see income, expenses, accounts, and trends laid out clearly — every number computed live from your own data, entirely on this device.</p>
+    <div class="welcome-actions" id="welcomeActions">
+      <button class="btn btn-primary" id="btnUploadWelcome">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 16V4M12 4l-4 4M12 4l4 4"/><path d="M4 16v3a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-3"/></svg>
+        Upload your Excel data
+      </button>
+      <button class="btn btn-ghost" id="btnSample" title="See the dashboard with sample data">Try a demo first</button>
+    </div>
+    <div id="authPanel" style="display:none;">
+      <div class="auth-box">
+        <label class="form-field"><span>Email</span><input type="email" id="authEmail" autocomplete="username" placeholder="you@example.com"></label>
+        <label class="form-field"><span>Password</span><input type="password" id="authPassword" autocomplete="current-password" placeholder="At least 6 characters"></label>
+        <div class="welcome-actions">
+          <button class="btn btn-primary" id="btnSignIn">Sign in</button>
+          <button class="btn btn-ghost" id="btnCreateAccount">Create account</button>
+        </div>
+        <p class="welcome-error" id="authError" style="display:none;"></p>
+      </div>
+    </div>
+    <p class="welcome-status" id="cloudWelcomeInfo" style="display:none;"></p>
+    <p class="welcome-status" id="welcomeStatus"></p>
+    <p class="welcome-status" id="welcomeStatus2"></p>
+    <p class="welcome-error" id="welcomeError" style="display:none;"></p>
+    <p class="welcome-note">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10Z"/></svg>
+      <span id="welcomeNoteText">Your workbook is parsed entirely in this browser tab. Nothing is uploaded anywhere.</span>
+    </p>
+  </div>
+</div>
+
+<!-- ============================= APP ============================= -->
+<div id="app">
+  <div class="topbar">
+    <div class="brand"><span class="mark-glyph">L</span><span>Ledgerline</span></div>
+    <div class="topbar-spacer"></div>
+    <div class="topbar-meta" id="topbarMeta"></div>
+    <select class="select" id="currencySelect" title="Display currency"></select>
+    <button class="icon-btn" id="btnExportCsv" title="Export filtered transactions as CSV">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12m0 0-4-4m4 4 4-4"/><path d="M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"/></svg>
+    </button>
+    <button class="icon-btn" id="btnExportWorkbook" title="Download your full data as an updated Excel workbook">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/><path d="M9.5 13.5l2 2-2 2M14.5 13.5l-2 2 2 2"/></svg>
+    </button>
+    <button class="icon-btn" id="btnPrint" title="Print / save report as PDF">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9V3h12v6"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><path d="M6 14h12v7H6z"/></svg>
+    </button>
+    <button class="icon-btn" id="btnTheme" title="Toggle dark mode">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79Z"/></svg>
+    </button>
+    <button class="btn btn-ghost btn-sm" id="btnUploadTop">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 16V4M12 4l-4 4M12 4l4 4"/><path d="M4 16v3a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-3"/></svg>
+      Upload data
+    </button>
+    <button class="btn btn-ghost btn-sm" id="btnSignOut" style="display:none;" title="Sign out of this device">Sign out</button>
+    <button class="icon-btn" id="btnReset" title="Reset dashboard">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/></svg>
+    </button>
+  </div>
+
+  <main>
+    <div id="bannerHost"></div>
+
+    <div class="page-title-row">
+      <h1 class="page-title">Personal Finance Dashboard</h1>
+      <p class="page-subtitle" id="pageSubtitle"></p>
+    </div>
+
+    <!-- FILTER BAR -->
+    <div class="filterbar">
+      <div class="filterbar-inner">
+        <div class="year-row" id="yearRow"></div>
+        <div class="month-row" id="monthRow"></div>
+        <p class="filter-hint">Hold Ctrl (or Cmd on Mac) and click to select multiple years or months.</p>
+        <div class="range-row" id="rangeRow">
+          <span class="range-label">Custom range</span>
+          <input type="date" class="select date-input" id="rangeStart">
+          <span class="range-to">to</span>
+          <input type="date" class="select date-input" id="rangeEnd">
+          <button class="btn btn-ghost btn-sm" id="btnApplyRange">Apply range</button>
+          <button class="btn btn-ghost btn-sm" id="btnClearRange" style="display:none;">Clear range</button>
+          <span class="pill-sep" style="height:22px;"></span>
+          <button class="btn btn-ghost btn-sm" id="btnResetFilters">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/></svg>
+            Reset filters
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- KPIs -->
+    <div class="section">
+      <div class="kpi-grid" id="kpiGrid"></div>
+    </div>
+
+    <!-- Accounts -->
+    <div class="section">
+      <div class="section-head">
+        <h2>My assets</h2>
+        <span class="section-sub" id="accountsSub"></span>
+      </div>
+      <div class="accounts-grid" id="accountsGrid"></div>
+      <p class="accounts-note" id="accountsNote"></p>
+    </div>
+
+    <!-- Category breakdown -->
+    <div class="section">
+      <div class="section-head"><h2>Category breakdown</h2><span class="section-sub" id="varianceSub"></span></div>
+      <div class="chart-grid">
+        <div class="card">
+          <div class="card-title-row"><span class="card-title">Expense by category</span><span class="card-caption" id="expCatCap"></span></div>
+          <div class="category-list" id="varExpenseCategoryList"></div>
+        </div>
+        <div class="card">
+          <div class="card-title-row"><span class="card-title">Income by category</span><span class="card-caption" id="incCatCap"></span></div>
+          <div class="category-list" id="varIncomeCategoryList"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Income vs Expense -->
+    <div class="section">
+      <div class="section-head"><h2>Income vs. expense</h2><span class="section-sub" id="cashflowSub"></span></div>
+      <div class="chart-grid">
+        <div class="card">
+          <div class="card-title-row"><span class="card-title">Monthly income vs. expense</span><span class="card-caption" id="capIncomeExpense"></span></div>
+          <div class="chart-wrap"><canvas id="chartIncomeExpense"></canvas><div class="empty-chart-msg" id="emptyIncomeExpense" style="display:none;">No data in this range</div></div>
+        </div>
+        <div class="card">
+          <div class="card-title-row"><span class="card-title">Income vs. expense — selected period</span></div>
+          <div class="chart-wrap short"><canvas id="chartComparison"></canvas></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Monthly expense trend -->
+    <div class="section">
+      <div class="section-head"><h2>Monthly expense trend</h2><span class="section-sub" id="capTrend"></span></div>
+      <div class="card">
+        <div class="chart-wrap"><canvas id="chartTrend"></canvas></div>
+        <p class="trend-note" id="trendNote"></p>
+      </div>
+    </div>
+
+    <!-- Income & Expense Variance Analysis -->
+    <div class="section" id="varianceSection">
+      <div class="section-head"><h2>Income &amp; expense variance analysis</h2></div>
+
+      <div class="card">
+        <div class="card-title-row"><span class="card-title">Expense trend by year</span><span class="card-caption" id="expMatrixCap"></span></div>
+        <div class="matrix-scroll" id="expMatrixWrap"></div>
+        <p class="matrix-caption">Every category, every year — independent of the filter above. Sorted by grand total.</p>
+      </div>
+      <div class="card" style="margin-top:14px;">
+        <div class="card-title-row"><span class="card-title">Income trend by year</span><span class="card-caption" id="incMatrixCap"></span></div>
+        <div class="matrix-scroll" id="incMatrixWrap"></div>
+        <p class="matrix-caption">Every category, every year — independent of the filter above. Sorted by grand total.</p>
+      </div>
+
+      <div class="card" style="margin-top:14px;">
+        <div class="card-title-row"><span class="card-title">Expense variance by category</span><span class="card-caption" id="expVarCap"></span></div>
+        <div class="table-scroll" id="expVarTableWrap"></div>
+      </div>
+      <div class="card" style="margin-top:14px;">
+        <div class="card-title-row"><span class="card-title">Expense comparison</span></div>
+        <div class="chart-wrap"><canvas id="chartExpenseVariance"></canvas><div class="empty-chart-msg" id="emptyExpVarChart" style="display:none;">No expense data to compare</div></div>
+      </div>
+
+      <div class="card" style="margin-top:14px;">
+        <div class="card-title-row"><span class="card-title">Income variance by category</span><span class="card-caption" id="incVarCap"></span></div>
+        <div class="table-scroll" id="incVarTableWrap"></div>
+      </div>
+    </div>
+
+    <!-- Top expenses -->
+    <div class="section">
+      <div class="section-head">
+        <h2>Top expenses</h2>
+        <span class="section-sub" id="topExpSub"></span>
+      </div>
+      <div class="table-scroll">
+        <table class="txn-table">
+          <thead><tr><th>Date</th><th>Description</th><th>Category</th><th>Amount</th></tr></thead>
+          <tbody id="topExpBody"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- Financial insights -->
+    <div class="section">
+      <div class="section-head"><h2>Financial insights</h2></div>
+      <div class="card"><ul class="insights-list" id="insightsList"></ul></div>
+    </div>
+
+    <!-- Month-on-month comparison -->
+    <div class="section">
+      <div class="section-head"><h2>Month-on-month comparison</h2><span class="section-sub" id="momSub"></span></div>
+      <div class="card"><div class="mom-grid" id="momGrid"></div></div>
+    </div>
+
+    <!-- Transactions -->
+    <div class="section" id="txnSection">
+      <div class="section-head">
+        <h2>Transactions</h2>
+        <span class="section-sub" id="txnCountSub"></span>
+      </div>
+      <div class="txn-toolbar">
+        <div class="search-wrap">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg>
+          <input type="text" class="search-input" id="txnSearch" placeholder="Search description, category, account…">
+        </div>
+        <select class="select" id="filterType"><option value="all">All types</option></select>
+        <select class="select" id="filterCategory"><option value="all">All categories</option></select>
+        <select class="select" id="filterAccount"><option value="all">All accounts</option></select>
+      </div>
+      <div class="table-scroll">
+        <table class="txn-table">
+          <thead><tr id="txnHeadRow"></tr></thead>
+          <tbody id="txnBody"></tbody>
+        </table>
+      </div>
+      <div class="txn-cards" id="txnCards"></div>
+      <div class="pagination">
+        <span class="pg-info" id="pgInfo"></span>
+        <div class="pg-btns">
+          <button class="pg-btn" id="pgFirst">«</button>
+          <button class="pg-btn" id="pgPrev">‹</button>
+          <button class="pg-btn" id="pgNext">›</button>
+          <button class="pg-btn" id="pgLast">»</button>
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <button class="fab" id="btnAddTxn" title="Add a transaction" aria-label="Add a transaction">+</button>
+
+  <footer class="app-footer">
+    <span id="footerLeft"></span>
+    <span>Built for your data only — nothing leaves this browser.</span>
+  </footer>
+</div>
+
+<input type="file" id="fileInput" accept=".xlsx,.xlsm,.xls" class="visually-hidden">
+<div id="toastHost"></div>
+
+<div class="modal-overlay" id="resetModal">
+  <div class="modal">
+    <h3>Reset dashboard?</h3>
+    <p>This clears the imported workbook data stored in this browser. Your original Excel file on disk is never touched. This can't be undone.</p>
+    <div class="modal-actions">
+      <button class="btn btn-ghost btn-sm" id="cancelReset">Cancel</button>
+      <button class="btn btn-danger-ghost btn-sm" id="confirmReset">Clear data</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-overlay" id="editTxnModal">
+  <div class="modal modal-wide">
+    <h3 id="editTxnTitle">Edit transaction</h3>
+    <p class="modal-note">This changes the copy of your data stored in this browser only — your original Excel file is never touched. Use "Download updated Excel" to save your edits back to a file.</p>
+    <div class="form-grid">
+      <label class="form-field">
+        <span>Type</span>
+        <select id="editType">
+          <option value="Income">Income</option>
+          <option value="Expense">Expense</option>
+          <option value="Transfer">Transfer</option>
+        </select>
+      </label>
+      <label class="form-field">
+        <span>Date</span>
+        <input type="date" id="editDate">
+      </label>
+      <label class="form-field form-field-wide">
+        <span>Description</span>
+        <input type="text" id="editDescription" placeholder="e.g. Grocery run">
+      </label>
+      <label class="form-field">
+        <span>Category</span>
+        <input type="text" id="editCategory" placeholder="e.g. Food">
+      </label>
+      <label class="form-field">
+        <span>Account</span>
+        <input type="text" id="editAccount" placeholder="e.g. Cash">
+      </label>
+      <label class="form-field">
+        <span>Income amount (money in)</span>
+        <input type="number" id="editAmountIn" min="0" step="0.01" placeholder="0">
+      </label>
+      <label class="form-field">
+        <span>Expense amount (money out)</span>
+        <input type="number" id="editAmountOut" min="0" step="0.01" placeholder="0">
+      </label>
+    </div>
+    <p class="modal-note" id="editTransferNote" style="display:none;">Transfers are stored as two linked rows in your data (one per account) — editing here only changes this one row, not its matching pair.</p>
+    <p class="modal-error" id="editTxnError" style="display:none;"></p>
+    <div class="modal-actions">
+      <button class="btn btn-ghost btn-sm" id="cancelEditTxn">Cancel</button>
+      <button class="btn btn-primary btn-sm" id="saveEditTxn">Save changes</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-overlay" id="addTxnModal">
+  <div class="modal modal-wide">
+    <h3>Add transaction</h3>
+    <div class="seg" id="addTypeSeg" role="tablist">
+      <button type="button" data-type="Expense" class="active">Expense</button>
+      <button type="button" data-type="Income">Income</button>
+      <button type="button" data-type="Transfer">Transfer</button>
+    </div>
+    <div class="form-grid">
+      <label class="form-field">
+        <span>Date</span>
+        <input type="date" id="addDate">
+      </label>
+      <label class="form-field">
+        <span>Amount</span>
+        <input type="number" id="addAmount" inputmode="decimal" min="0" step="any" placeholder="0">
+      </label>
+      <label class="form-field form-field-wide">
+        <span>Description</span>
+        <input type="text" id="addDescription" placeholder="e.g. Grocery run" autocomplete="off">
+      </label>
+      <label class="form-field" id="addCategoryWrap">
+        <span>Category</span>
+        <input type="text" id="addCategory" placeholder="e.g. Food" autocomplete="off">
+      </label>
+      <label class="form-field" id="addAccountWrap">
+        <span>Account</span>
+        <input type="text" id="addAccount" placeholder="e.g. Cash" autocomplete="off">
+      </label>
+      <label class="form-field" id="addFromWrap" style="display:none;">
+        <span>From account</span>
+        <input type="text" id="addFromAccount" placeholder="Money leaves this account" autocomplete="off">
+      </label>
+      <label class="form-field" id="addToWrap" style="display:none;">
+        <span>To account</span>
+        <input type="text" id="addToAccount" placeholder="Money arrives in this account" autocomplete="off">
+      </label>
+    </div>
+    <p class="modal-note" id="addTransferNote" style="display:none;">A transfer is saved as two linked rows — money out of the first account and into the second — and is not counted as income or expense.</p>
+    <p class="modal-error" id="addTxnError" style="display:none;"></p>
+    <div class="add-actions">
+      <button class="btn btn-ghost btn-sm" id="cancelAddTxn">Cancel</button>
+      <button class="btn btn-ghost btn-sm" id="saveAddAnother">Save &amp; add another</button>
+      <button class="btn btn-primary btn-sm" id="saveAddTxn">Save</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-overlay" id="deleteTxnModal">
+  <div class="modal">
+    <h3>Delete this transaction?</h3>
+    <p id="deleteTxnDetail"></p>
+    <p class="modal-note">This removes it from the copy of your data stored in this browser. Your original Excel file on disk is never touched. This can't be undone.</p>
+    <div class="modal-actions">
+      <button class="btn btn-ghost btn-sm" id="cancelDeleteTxn">Cancel</button>
+      <button class="btn btn-danger-ghost btn-sm" id="confirmDeleteTxn">Delete</button>
+    </div>
+  </div>
+</div>
+
+<div id="loadingOverlay"><div class="spinner"></div><span id="loadingText">Reading your workbook…</span></div>
+
+<script>
+(function(){
+"use strict";
+
+/* ======================================================================
+   CONSTANTS
+   ====================================================================== */
+var MONTH_NAMES = ["January","February","March","April","May","June","July","August","September","October","November","December"];
+var MONTH_SHORT = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+
+var CURRENCIES = {
+  PKR:{ symbol:"Rs", label:"PKR — Pakistani Rupee" },
+  AED:{ symbol:"AED", label:"AED — UAE Dirham" },
+  USD:{ symbol:"$", label:"USD — US Dollar" },
+  INR:{ symbol:"₹", label:"INR — Indian Rupee" },
+  SAR:{ symbol:"SAR", label:"SAR — Saudi Riyal" },
+  GBP:{ symbol:"£", label:"GBP — British Pound" },
+  EUR:{ symbol:"€", label:"EUR — Euro" }
+};
+
+var CATEGORY_PALETTE = [
+  "#2E6F5E","#B9862F","#AD4A32","#4C7A9E","#8B5FA6","#5C8A3C","#C2694F","#3E8E86",
+  "#9A6B2E","#6E6E9E","#7F9E4C","#A85C7C","#3E6E9E","#B68A3E","#5E9E7E","#9E5E5E"
+];
+
+var TYPE_SYNS = ["voucher type","transaction type","txn type","type","entry type"];
+var DATE_SYNS = ["voucher date","transaction date","txn date","date","entry date"];
+var DESC_SYNS = ["description","narration","details","memo","particulars","remarks"];
+var CATEGORY_SYNS = ["category name","category","expense category","head"];
+var ACCOUNT_SYNS = ["account name","account","account/head","wallet"];
+var IN_SYNS = ["dr","debit","money in","inflow","amount in","received","credit in","in"];
+var OUT_SYNS = ["cr","credit","money out","outflow","amount out","paid","spent","debit out","out"];
+var AMOUNT_SYNS = ["amount","value","net amount","voucher amount","transaction amount"];
+
+/* ======================================================================
+   STATE
+   ====================================================================== */
+var state = {
+  transactions: [],      // {type,date(Date),ts,year,month,description,category,account,amountIn,amountOut}
+  meta: {},
+  years: [],
+  currency: "PKR",
+  theme: "light",
+  selectedYears: [],      // [] = all years; otherwise array of selected years (multi-select)
+  selectedMonths: [],     // [] = all months; otherwise array of selected months 1-12 (multi-select)
+  customRange: null,     // {start:ts, end:ts} | null — overrides year/month when set
+  search: "",
+  txnType: "all",
+  txnCategory: "all",
+  txnAccount: "all",
+  sortCol: "date",
+  sortDir: "desc",
+  page: 1,
+  pageSize: 25
+};
+
+var charts = {};
+var DB_NAME = "ledgerlineDB", DB_STORE = "workbook", DB_KEY = "current";
+
+/* ======================================================================
+   UTILITIES
+   ====================================================================== */
+function $(sel){ return document.querySelector(sel); }
+function $all(sel){ return Array.prototype.slice.call(document.querySelectorAll(sel)); }
+function el(tag, cls, html){
+  var e = document.createElement(tag);
+  if (cls) e.className = cls;
+  if (html !== undefined) e.innerHTML = html;
+  return e;
+}
+function escapeHtml(s){
+  return String(s == null ? "" : s).replace(/[&<>"']/g, function(c){
+    return {"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c];
+  });
+}
+function clampPage(p, total){ return Math.max(1, Math.min(p, Math.max(1,total))); }
+
+function parseAmount(v){
+  if (v === null || v === undefined) return 0;
+  if (typeof v === "number") return isFinite(v) ? v : 0;
+  var s = String(v).trim();
+  if (s === "" || s === "-" || s === "—") return 0;
+  var neg = false;
+  if (/^\(.*\)$/.test(s)){ neg = true; s = s.slice(1,-1); }
+  s = s.replace(/[^0-9.\-]/g, "");
+  var n = parseFloat(s);
+  if (isNaN(n)) return 0;
+  return neg ? -Math.abs(n) : n;
+}
+
+function normalizeCategory(raw){
+  if (!raw) return "Uncategorized";
+  var t = String(raw).trim().replace(/\s+/g," ");
+  if (!t) return "Uncategorized";
+  return t.replace(/\w\S*/g, function(w){ return w.charAt(0).toUpperCase() + w.slice(1).toLowerCase(); });
+}
+
+function normKey(s){ return String(s||"").trim().toLowerCase(); }
+
+function parseFlexibleDate(v){
+  if (typeof v === "number"){
+    // Excel serial date (1900 system) — this is now the primary path, since the
+    // workbook is read without cellDates so every date cell arrives as its raw
+    // serial number. This is the exact mathematical inverse of excelSerialDate()
+    // used on export, independently verified against known reference points
+    // (e.g. serial 43831 = 1 Jan 2020; serial 46266 = 1 Sep 2026).
+    var utcMs = Math.round((v - 25569) * 86400000);
+    var d = new Date(utcMs);
+    if (!isNaN(d.getTime())) return new Date(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate());
+  }
+  if (v instanceof Date && !isNaN(v.getTime())){
+    // Fallback for any Date object handed to us directly (e.g. the built-in
+    // demo/sample data, built in memory rather than read from a file).
+    // Re-anchor via UTC getters in case it was built UTC-anchored, so the
+    // calendar date is preserved regardless of the viewer's timezone.
+    return new Date(v.getUTCFullYear(), v.getUTCMonth(), v.getUTCDate());
+  }
+  if (typeof v === "string"){
+    var s = v.trim();
+    if (!s) return null;
+    var m;
+    if ((m = s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/))){
+      return new Date(+m[1], +m[2]-1, +m[3]);
+    }
+    if ((m = s.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})/))){
+      var a=+m[1], b=+m[2], y=+m[3];
+      // This workbook's dates are written day/month/year (e.g. "01/09/2026" = 1 September).
+      // Only fall back to month/day if the first number can't possibly be a day (day/month is
+      // otherwise always assumed, since that's this workbook's actual convention).
+      if (a>12 && b<=12) return new Date(y, b-1, a); // unambiguous DD/MM/YYYY
+      if (b>12 && a<=12) return new Date(y, a-1, b); // unambiguous MM/DD/YYYY
+      return new Date(y, b-1, a); // ambiguous (both <=12) -> assume DD/MM/YYYY
+    }
+    var native = new Date(s);
+    if (!isNaN(native.getTime())) return native;
+  }
+  return null;
+}
+
+function fmtCurrency(n, opts){
+  opts = opts || {};
+  var symbol = CURRENCIES[state.currency] ? CURRENCIES[state.currency].symbol : state.currency;
+  var v = Math.round(n);
+  var neg = v < 0;
+  var s = Math.abs(v).toLocaleString("en-US");
+  var out = symbol + " " + s;
+  if (neg) out = "-" + out;
+  return out;
+}
+function fmtCompact(n){
+  var abs = Math.abs(n);
+  var symbol = CURRENCIES[state.currency] ? CURRENCIES[state.currency].symbol : state.currency;
+  var sign = n<0 ? "-" : "";
+  if (abs >= 1e7) return sign+symbol+" "+(abs/1e7).toFixed(2)+"Cr";
+  if (abs >= 1e5) return sign+symbol+" "+(abs/1e5).toFixed(2)+"L";
+  if (abs >= 1e3) return sign+symbol+" "+(abs/1e3).toFixed(1)+"K";
+  return sign+symbol+" "+Math.round(abs);
+}
+function fmtPct(n){ return (n>=0?"":"-") + Math.abs(n).toFixed(1) + "%"; }
+function fmtDate(d){
+  if (!d) return "—";
+  return d.toLocaleDateString("en-US", { year:"numeric", month:"short", day:"2-digit" });
+}
+
+function toast(msg, ms){
+  var host = $("#toastHost");
+  var t = el("div","toast", escapeHtml(msg));
+  host.appendChild(t);
+  requestAnimationFrame(function(){ t.classList.add("show"); });
+  setTimeout(function(){
+    t.classList.remove("show");
+    setTimeout(function(){ t.remove(); }, 300);
+  }, ms || 3200);
+}
+
+function showBanner(kind, message, id){
+  var host = $("#bannerHost");
+  var existing = id && document.getElementById(id);
+  if (existing) existing.remove();
+  var b = el("div","banner "+kind);
+  if (id) b.id = id;
+  var iconPath = kind==="error"
+    ? '<circle cx="12" cy="12" r="10"/><path d="M12 8v4M12 16h.01"/>'
+    : '<path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0Z"/><path d="M12 9v4M12 17h.01"/>';
+  b.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">'+iconPath+'</svg><span>'+message+'</span><button class="close-banner">✕</button>';
+  b.querySelector(".close-banner").onclick = function(){ b.remove(); };
+  host.appendChild(b);
+}
+
+/* ======================================================================
+   INDEXEDDB PERSISTENCE
+   ====================================================================== */
+function openDB(){
+  return new Promise(function(resolve, reject){
+    var req = indexedDB.open(DB_NAME, 1);
+    req.onupgradeneeded = function(){ req.result.createObjectStore(DB_STORE, {keyPath:"id"}); };
+    req.onsuccess = function(){ resolve(req.result); };
+    req.onerror = function(){ reject(req.error); };
+  });
+}
+function dbSave(payload){
+  return openDB().then(function(db){
+    return new Promise(function(resolve, reject){
+      var tx = db.transaction(DB_STORE, "readwrite");
+      tx.objectStore(DB_STORE).put({ id: DB_KEY, payload: payload });
+      tx.oncomplete = function(){ resolve(true); };
+      tx.onerror = function(){ reject(tx.error); };
+    });
+  });
+}
+function dbLoad(){
+  return openDB().then(function(db){
+    return new Promise(function(resolve, reject){
+      var tx = db.transaction(DB_STORE, "readonly");
+      var req = tx.objectStore(DB_STORE).get(DB_KEY);
+      req.onsuccess = function(){ resolve(req.result ? req.result.payload : null); };
+      req.onerror = function(){ reject(req.error); };
+    });
+  });
+}
+function dbClear(){
+  return openDB().then(function(db){
+    return new Promise(function(resolve, reject){
+      var tx = db.transaction(DB_STORE, "readwrite");
+      tx.objectStore(DB_STORE).delete(DB_KEY);
+      tx.oncomplete = function(){ resolve(true); };
+      tx.onerror = function(){ reject(tx.error); };
+    });
+  });
+}
+
+/* ======================================================================
+   WORKBOOK PARSING
+   ====================================================================== */
+function scoreHeaderRow(rowArr){
+  var found = { type:-1, date:-1, description:-1, category:-1, account:-1, amountIn:-1, amountOut:-1, amount:-1 };
+  for (var c = 0; c < rowArr.length; c++){
+    var key = normKey(rowArr[c]);
+    if (!key) continue;
+    if (found.type === -1 && TYPE_SYNS.indexOf(key) !== -1) { found.type = c; continue; }
+    if (found.date === -1 && DATE_SYNS.indexOf(key) !== -1) { found.date = c; continue; }
+    if (found.description === -1 && DESC_SYNS.indexOf(key) !== -1) { found.description = c; continue; }
+    if (found.category === -1 && CATEGORY_SYNS.indexOf(key) !== -1) { found.category = c; continue; }
+    if (found.account === -1 && ACCOUNT_SYNS.indexOf(key) !== -1) { found.account = c; continue; }
+    if (found.amountIn === -1 && IN_SYNS.indexOf(key) !== -1) { found.amountIn = c; continue; }
+    if (found.amountOut === -1 && OUT_SYNS.indexOf(key) !== -1) { found.amountOut = c; continue; }
+    if (found.amount === -1 && AMOUNT_SYNS.indexOf(key) !== -1) { found.amount = c; continue; }
+  }
+  var score = 0;
+  if (found.type !== -1) score += 3;
+  if (found.date !== -1) score += 3;
+  if (found.amountIn !== -1) score += 2;
+  if (found.amountOut !== -1) score += 2;
+  if (found.amount !== -1) score += 1;
+  if (found.category !== -1) score += 1;
+  if (found.account !== -1) score += 1;
+  if (found.description !== -1) score += 1;
+  return { score: score, cols: found };
+}
+
+function detectMainSheet(workbook){
+  var best = null;
+  workbook.SheetNames.forEach(function(name){
+    var ws = workbook.Sheets[name];
+    var grid = XLSX.utils.sheet_to_json(ws, { header:1, defval:null, raw:true, blankrows:false });
+    var scanRows = Math.min(12, grid.length);
+    for (var r = 0; r < scanRows; r++){
+      var res = scoreHeaderRow(grid[r] || []);
+      // must have at least type + date + one amount source to qualify
+      var viable = res.cols.type !== -1 && res.cols.date !== -1 && (res.cols.amountIn !== -1 || res.cols.amountOut !== -1 || res.cols.amount !== -1);
+      if (viable && (!best || res.score > best.score)){
+        best = { sheetName:name, headerRowIndex:r, cols:res.cols, score:res.score, grid:grid };
+      }
+    }
+  });
+  return best;
+}
+
+function detectCurrency(transactions){
+  var text = transactions.slice(0, 400).map(function(t){ return (t.account||"")+" "+(t.description||""); }).join(" ").toLowerCase();
+  var scores = {
+    PKR: 0, AED: 0, USD: 0, INR: 0, SAR: 0, GBP: 0, EUR: 0
+  };
+  var kw = {
+    PKR: ["habib","askari","meezan","ubl","alfalah","faysal","pakistan","jazzcash","easypaisa","easy paisa","soneri","allied bank","national bank","rupee","pkr","rs.","habib bank"],
+    AED: ["aed","dirham","dubai","abu dhabi","emirates","sharjah","ajman"],
+    USD: ["usd","dollar","chase","wells fargo","bank of america"],
+    INR: ["inr","hdfc","icici","sbi ","axis bank","rupee india"],
+    SAR: ["sar","riyal","saudi","riyadh","jeddah"],
+    GBP: ["gbp","pound sterling","barclays","hsbc uk"],
+    EUR: ["eur","euro","deutsche bank"]
+  };
+  Object.keys(kw).forEach(function(code){
+    kw[code].forEach(function(k){ if (text.indexOf(k) !== -1) scores[code]++; });
+  });
+  var bestCode = "PKR", bestScore = -1;
+  Object.keys(scores).forEach(function(code){ if (scores[code] > bestScore){ bestScore = scores[code]; bestCode = code; } });
+  return bestScore > 0 ? bestCode : "PKR";
+}
+
+function buildTransactionsFromWorkbook(workbook){
+  var detection = detectMainSheet(workbook);
+  if (!detection){
+    return { error: "Could not find a transactions sheet. Looked for columns like Voucher Type, Date, Category, Account, and Debit/Credit amounts across " + workbook.SheetNames.length + " sheet(s): " + workbook.SheetNames.join(", ") + "." };
+  }
+  var grid = detection.grid, cols = detection.cols;
+  var txns = [];
+  var skipped = 0;
+  var idCounter = 1;
+  for (var r = detection.headerRowIndex + 1; r < grid.length; r++){
+    var row = grid[r];
+    if (!row) continue;
+    var typeRaw = cols.type !== -1 ? row[cols.type] : null;
+    var type = typeRaw ? String(typeRaw).trim() : "";
+    var dateRaw = cols.date !== -1 ? row[cols.date] : null;
+    var date = parseFlexibleDate(dateRaw);
+    var hasAnyAmount = (cols.amountIn !== -1 && row[cols.amountIn] != null && row[cols.amountIn] !== "") ||
+                        (cols.amountOut !== -1 && row[cols.amountOut] != null && row[cols.amountOut] !== "") ||
+                        (cols.amount !== -1 && row[cols.amount] != null && row[cols.amount] !== "");
+    if (!type && !date && !hasAnyAmount) continue; // fully blank row
+    if (!date || !type){ skipped++; continue; }
+
+    var amountIn = cols.amountIn !== -1 ? parseAmount(row[cols.amountIn]) : 0;
+    var amountOut = cols.amountOut !== -1 ? parseAmount(row[cols.amountOut]) : 0;
+    if (cols.amountIn === -1 && cols.amountOut === -1 && cols.amount !== -1){
+      var signedAmt = parseAmount(row[cols.amount]);
+      var tlow = type.toLowerCase();
+      if (tlow === "income") amountIn = Math.abs(signedAmt);
+      else if (tlow === "expense") amountOut = Math.abs(signedAmt);
+      else { // transfer or unknown, split by sign
+        if (signedAmt >= 0) amountIn = signedAmt; else amountOut = Math.abs(signedAmt);
+      }
+    }
+    var description = cols.description !== -1 ? (row[cols.description] == null ? "" : String(row[cols.description]).trim()) : "";
+    var category = normalizeCategory(cols.category !== -1 ? row[cols.category] : null);
+    var account = cols.account !== -1 ? String(row[cols.account] == null ? "" : row[cols.account]).trim() : "Unassigned";
+    if (!account) account = "Unassigned";
+
+    var normType = type;
+    var tl = type.toLowerCase();
+    if (tl === "income") normType = "Income";
+    else if (tl === "expense") normType = "Expense";
+    else if (tl === "transfer") normType = "Transfer";
+
+    txns.push({
+      id: idCounter++,
+      type: normType,
+      date: date,
+      ts: date.getTime(),
+      year: date.getFullYear(),
+      month: date.getMonth() + 1,
+      description: description,
+      category: category,
+      account: account,
+      amountIn: amountIn,
+      amountOut: amountOut,
+      edited: false
+    });
+  }
+  txns.sort(function(a,b){ return a.ts - b.ts; });
+  return { transactions: txns, skipped: skipped, sheetName: detection.sheetName };
+}
+
+/* ======================================================================
+   COMPUTE ENGINE
+   ====================================================================== */
+function getAllYears(){
+  var set = {};
+  state.transactions.forEach(function(t){ set[t.year] = true; });
+  return Object.keys(set).map(Number).sort(function(a,b){ return a-b; });
+}
+
+function periodFilter(t, years, months){
+  if (years.length && years.indexOf(t.year) === -1) return false;
+  if (months.length && months.indexOf(t.month) === -1) return false;
+  return true;
+}
+
+function filteredTransactions(){
+  if (state.customRange){
+    var cr = state.customRange;
+    return state.transactions.filter(function(t){ return t.ts >= cr.start && t.ts <= cr.end; });
+  }
+  return state.transactions.filter(function(t){ return periodFilter(t, state.selectedYears, state.selectedMonths); });
+}
+
+function periodBounds(){
+  var minTs = state.transactions.length ? state.transactions[0].ts : null;
+  var maxTs = state.transactions.length ? state.transactions[state.transactions.length-1].ts : null;
+  if (state.customRange){
+    return { start: state.customRange.start, end: state.customRange.end, prevStart: null, prevEnd: null, label: "Custom range", prevLabel: null };
+  }
+  var years = state.selectedYears, months = state.selectedMonths;
+  var noYearFilter = years.length === 0, noMonthFilter = months.length === 0;
+
+  var label;
+  if (noYearFilter && noMonthFilter) label = "All time";
+  else {
+    var yearPart = noYearFilter ? "all years" : years.slice().sort(function(a,b){return a-b;}).join(", ");
+    var monthPart = noMonthFilter ? "" : months.slice().sort(function(a,b){return a-b;}).map(function(m){ return MONTH_SHORT[m-1]; }).join(", ");
+    label = monthPart ? (monthPart + " " + yearPart) : yearPart;
+  }
+
+  var matching = state.transactions.filter(function(t){ return periodFilter(t, years, months); });
+  var start = matching.length ? matching[0].ts : minTs;
+  var end = matching.length ? matching[matching.length-1].ts : maxTs;
+
+  var prevStart = null, prevEnd = null, prevLabel = null;
+  if (years.length === 1){
+    var y = years[0];
+    if (months.length === 1){
+      var m = months[0];
+      var pm = m === 1 ? 12 : m-1, py = m === 1 ? y-1 : y;
+      prevStart = new Date(py, pm-1, 1).getTime();
+      var pLastDay = new Date(py, pm, 0).getDate();
+      prevEnd = new Date(py, pm-1, pLastDay, 23,59,59).getTime();
+      prevLabel = MONTH_NAMES[pm-1] + " " + py;
+    } else if (months.length === 0){
+      prevStart = new Date(y-1, 0, 1).getTime();
+      prevEnd = new Date(y-1, 11, 31, 23,59,59).getTime();
+      prevLabel = String(y-1);
+    }
+  }
+
+  return { start:start, end:end, prevStart:prevStart, prevEnd:prevEnd, label:label, prevLabel:prevLabel };
+}
+
+function sumIncomeExpense(txns){
+  var income = 0, expense = 0, count = 0, largest = { amt:0, desc:"", category:"" };
+  var incomeCats = {}, expenseCats = {};
+  txns.forEach(function(t){
+    if (t.type === "Income"){
+      income += t.amountIn; count++;
+      incomeCats[t.category] = (incomeCats[t.category]||0) + t.amountIn;
+    } else if (t.type === "Expense"){
+      expense += t.amountOut; count++;
+      expenseCats[t.category] = (expenseCats[t.category]||0) + t.amountOut;
+      if (t.amountOut > largest.amt) largest = { amt:t.amountOut, desc:t.description||t.category, category:t.category };
+    } else {
+      count++;
+    }
+  });
+  return { income:income, expense:expense, net: income-expense, count:count, largest:largest, incomeCats:incomeCats, expenseCats:expenseCats };
+}
+
+function accountBalancesAsOf(cutoffTs){
+  var bal = {};
+  state.transactions.forEach(function(t){
+    if (cutoffTs != null && t.ts > cutoffTs) return;
+    bal[t.account] = (bal[t.account]||0) + t.amountIn - t.amountOut;
+  });
+  return bal;
+}
+
+// Attaches balanceAfter (the running balance of its own account, immediately
+// after this transaction) to every transaction. Must be called once, in
+// chronological order, whenever state.transactions is (re)built.
+function computeRunningBalances(txns){
+  var bal = {};
+  txns.forEach(function(t){
+    bal[t.account] = (bal[t.account]||0) + t.amountIn - t.amountOut;
+    t.balanceAfter = bal[t.account];
+  });
+}
+
+function latestDataMonth(){
+  if (!state.transactions.length) return null;
+  var last = state.transactions[state.transactions.length-1];
+  return { year: last.year, month: last.month };
+}
+
+/* ======================================================================
+   RENDER: FILTER BAR
+   ====================================================================== */
+function toggleMultiSelect(arr, value, isMultiKey){
+  if (!isMultiKey) return [value];
+  var idx = arr.indexOf(value);
+  if (idx !== -1){ var copy = arr.slice(); copy.splice(idx,1); return copy; }
+  return arr.concat([value]);
+}
+
+function renderFilterBar(){
+  var isCustom = !!state.customRange;
+
+  var yearRow = $("#yearRow");
+  yearRow.innerHTML = "";
+  var allBtn = el("button","pill" + (state.selectedYears.length===0 && !isCustom ? " active" : ""), "All years");
+  allBtn.onclick = function(){ state.selectedYears = []; state.customRange = null; state.page=1; onFilterChange(); };
+  yearRow.appendChild(allBtn);
+  var sep = el("span","pill-sep"); yearRow.appendChild(sep);
+  state.years.forEach(function(y){
+    var b = el("button","pill" + (state.selectedYears.indexOf(y)!==-1 && !isCustom ? " active" : ""), String(y));
+    b.onclick = function(e){
+      state.selectedYears = toggleMultiSelect(state.selectedYears, y, e.ctrlKey || e.metaKey);
+      state.customRange = null; state.page=1; onFilterChange();
+    };
+    yearRow.appendChild(b);
+  });
+  if (isCustom){
+    var cb = el("button","pill active", "Custom range");
+    yearRow.appendChild(cb);
+  }
+
+  var monthRow = $("#monthRow");
+  monthRow.innerHTML = "";
+  if (isCustom){
+    monthRow.classList.add("hidden");
+  } else {
+    monthRow.classList.remove("hidden");
+    var presentMonths = {};
+    var yearsForMonthCheck = state.selectedYears.length ? state.selectedYears : null;
+    state.transactions.forEach(function(t){
+      if (yearsForMonthCheck && yearsForMonthCheck.indexOf(t.year)===-1) return;
+      presentMonths[t.month] = true;
+    });
+    var allM = el("button","mpill" + (state.selectedMonths.length===0 ? " active" : ""), "All months");
+    allM.onclick = function(){ state.selectedMonths = []; state.page=1; onFilterChange(); };
+    monthRow.appendChild(allM);
+    for (var m=1; m<=12; m++){
+      var has = presentMonths[m];
+      var mb = el("button","mpill" + (state.selectedMonths.indexOf(m)!==-1 ? " active" : "") + (has?"":" empty"), MONTH_SHORT[m-1]);
+      if (has){
+        mb.onclick = (function(mm){ return function(e){
+          state.selectedMonths = toggleMultiSelect(state.selectedMonths, mm, e.ctrlKey || e.metaKey);
+          state.page=1; onFilterChange();
+        }; })(m);
+      }
+      monthRow.appendChild(mb);
+    }
+  }
+
+  $("#btnClearRange").style.display = isCustom ? "inline-flex" : "none";
+}
+
+/* ======================================================================
+   RENDER: KPIs
+   ====================================================================== */
+var KPI_ICONS = {
+  income: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5M5 12l7-7 7 7"/></svg>',
+  expense: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M19 12l-7 7-7-7"/></svg>',
+  net: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12h18M3 6h18M3 18h11"/></svg>',
+  assets: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 21h18M4 21V9l8-6 8 6v12M9 21v-6h6v6"/></svg>',
+  savings: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M9.5 15.5c.7.7 1.6 1 2.5 1 1.8 0 3-1 3-2.3 0-3-5-1.6-5-4.4 0-1.3 1.2-2.3 3-2.3.9 0 1.8.3 2.5 1"/><path d="M12 6v1.3M12 16.7V18"/></svg>',
+  txn: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"/></svg>'
+};
+var TREND_UP = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12l5-5 4 4 5-5"/><path d="M15 6h4v4"/></svg>';
+var TREND_DOWN = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5 6l5 5 4-4 5 5"/><path d="M15 12h4v-4"/></svg>';
+
+function trendBadge(pct, invert){
+  if (pct === null || !isFinite(pct)) return '<span class="kpi-trend flat">—</span>';
+  var good = invert ? pct <= 0 : pct >= 0;
+  var arrow = pct >= 0 ? TREND_UP : TREND_DOWN;
+  return '<span class="kpi-trend '+(good?"pos":"neg")+'">'+arrow+' '+fmtPct(Math.abs(pct)).replace("-","")+'</span>';
+}
+
+function renderKPIs(){
+  var bounds = periodBounds();
+  var periodTxns = filteredTransactions();
+  var periodSums = sumIncomeExpense(periodTxns);
+
+  var finalBal = accountBalancesAsOf(bounds.end);
+  var totalAssets = 0;
+  Object.keys(finalBal).forEach(function(k){ if (finalBal[k] > 0.005) totalAssets += finalBal[k]; });
+
+  var savingsRate = periodSums.income > 0 ? (periodSums.net / periodSums.income * 100) : null;
+
+  var prevIncome=null, prevExpense=null, prevNet=null, prevAssets=null, prevSavingsRate=null;
+  if (bounds.prevStart != null){
+    var prevTxns = state.transactions.filter(function(t){ return t.ts>=bounds.prevStart && t.ts<=bounds.prevEnd; });
+    var ps = sumIncomeExpense(prevTxns);
+    prevIncome = ps.income; prevExpense = ps.expense; prevNet = ps.net;
+    prevSavingsRate = ps.income > 0 ? (ps.net/ps.income*100) : null;
+    var prevBal = accountBalancesAsOf(bounds.prevEnd);
+    prevAssets = 0; Object.keys(prevBal).forEach(function(k){ if (prevBal[k]>0.005) prevAssets += prevBal[k]; });
+  }
+
+  var cards = [
+    { key:"income", label:"TOTAL INCOME", value: fmtCurrency(periodSums.income), cls:"pos",
+      trend: trendBadge(pctChange(prevIncome, periodSums.income), false) },
+    { key:"expense", label:"TOTAL EXPENSES", value: fmtCurrency(periodSums.expense), cls:"neg",
+      trend: trendBadge(pctChange(prevExpense, periodSums.expense), true) },
+    { key:"net", label:"NET CASH FLOW", value: fmtCurrency(periodSums.net), cls: periodSums.net>=0?"pos":"neg",
+      trend: trendBadge(pctChange(prevNet, periodSums.net), false) },
+    { key:"assets", label:"TOTAL ASSETS", value: fmtCurrency(totalAssets), cls:"",
+      trend: prevAssets!=null ? trendBadge(pctChange(prevAssets, totalAssets), false) : '<span class="kpi-trend flat">as of '+ (bounds.label==="All time"?"latest data":bounds.label) +'</span>' },
+    { key:"savings", label:"SAVINGS RATE", value: savingsRate===null ? "—" : fmtPct(savingsRate), cls: savingsRate===null ? "" : (savingsRate>=0?"pos":"neg"),
+      trend: (savingsRate!==null && prevSavingsRate!=null) ? trendBadge(savingsRate-prevSavingsRate, false) : '<span class="kpi-trend flat">of income saved</span>' },
+    { key:"txn", label:"TOTAL TRANSACTIONS", value: periodSums.count.toLocaleString(), cls:"",
+      trend: '<span class="kpi-trend flat">'+bounds.label+'</span>' }
+  ];
+  var grid = $("#kpiGrid");
+  grid.innerHTML = "";
+  cards.forEach(function(c){
+    var card = el("div","kpi-card");
+    card.innerHTML =
+      '<div class="kpi-top"><span class="kpi-icon i-'+c.key+'">'+KPI_ICONS[c.key]+'</span>'+c.trend+'</div>' +
+      '<div class="kpi-label" style="margin-top:12px;">'+c.label+'</div>' +
+      '<div class="kpi-value tabular '+c.cls+'">'+escapeHtml(c.value)+'</div>';
+    grid.appendChild(card);
+  });
+
+  $("#cashflowSub").textContent = "Showing " + bounds.label.toLowerCase();
+  $("#pageSubtitle").textContent = "Live figures for " + bounds.label.toLowerCase() + " — computed directly from your workbook.";
+}
+
+/* ======================================================================
+   RENDER: CHARTS
+   ====================================================================== */
+function ensureChart(key, ctxId, config){
+  var canvas = document.getElementById(ctxId);
+  if (!canvas) return null;
+  var wrap = canvas.closest(".chart-wrap");
+  if (typeof Chart === "undefined"){
+    if (wrap && !wrap.querySelector(".lib-missing-msg")){
+      var msg = el("div","empty-chart-msg lib-missing-msg", "Charting library unavailable — check your internet connection and reload.");
+      wrap.appendChild(msg);
+    }
+    return null;
+  }
+  if (charts[key]){ charts[key].destroy(); }
+  charts[key] = new Chart(canvas.getContext("2d"), config);
+  return charts[key];
+}
+
+function themeColors(){
+  var css = getComputedStyle(document.documentElement);
+  return {
+    ink: css.getPropertyValue("--ink").trim(),
+    inkMuted: css.getPropertyValue("--ink-muted").trim(),
+    inkFaint: css.getPropertyValue("--ink-faint").trim(),
+    line: css.getPropertyValue("--line").trim(),
+    positive: css.getPropertyValue("--positive").trim(),
+    negative: css.getPropertyValue("--negative").trim(),
+    gold: css.getPropertyValue("--gold").trim(),
+    brand: css.getPropertyValue("--brand").trim(),
+    surface: css.getPropertyValue("--surface").trim()
+  };
+}
+
+function renderIncomeExpenseChart(){
+  var tc = themeColors();
+  var singleYear = state.selectedYears.length === 1 ? state.selectedYears[0] : null;
+  var granularity = singleYear !== null ? "month" : "year";
+  var buckets = [];
+  if (granularity === "year"){
+    state.years.forEach(function(y){
+      var txns = state.transactions.filter(function(t){ return t.year===y && (state.selectedMonths.length===0 || state.selectedMonths.indexOf(t.month)!==-1); });
+      var s = sumIncomeExpense(txns);
+      buckets.push({ label:String(y), income:s.income, expense:s.expense, net:s.net });
+    });
+  } else {
+    for (var m=1; m<=12; m++){
+      var txns = state.transactions.filter(function(t){ return t.year===singleYear && t.month===m; });
+      var s = sumIncomeExpense(txns);
+      buckets.push({ label:MONTH_SHORT[m-1], income:s.income, expense:s.expense, net:s.net });
+    }
+  }
+  var hasData = buckets.some(function(b){ return b.income || b.expense; });
+  document.getElementById("emptyIncomeExpense").style.display = hasData ? "none" : "flex";
+  $("#capIncomeExpense").textContent = granularity === "year" ? "By year" : "By month, " + singleYear;
+
+  ensureChart("incomeExpense", "chartIncomeExpense", {
+    data: {
+      labels: buckets.map(function(b){ return b.label; }),
+      datasets: [
+        { type:"bar", label:"Income", data: buckets.map(function(b){ return b.income; }), backgroundColor: tc.positive, borderRadius:4, order:2, maxBarThickness:34 },
+        { type:"bar", label:"Expense", data: buckets.map(function(b){ return b.expense; }), backgroundColor: tc.negative, borderRadius:4, order:2, maxBarThickness:34 },
+        { type:"line", label:"Net", data: buckets.map(function(b){ return b.net; }), borderColor: tc.gold, backgroundColor: tc.gold, tension:0.35, order:1, pointRadius:3, borderWidth:2 }
+      ]
+    },
+    options: {
+      responsive:true, maintainAspectRatio:false,
+      interaction:{ mode:"index", intersect:false },
+      plugins:{
+        legend:{ position:"top", labels:{ color: tc.inkMuted, boxWidth:10, boxHeight:10, usePointStyle:true, font:{family:"Inter",size:11} } },
+        tooltip:{ callbacks:{ label:function(ctx){ return ctx.dataset.label + ": " + fmtCurrency(ctx.parsed.y); } } }
+      },
+      scales:{
+        x:{ ticks:{ color: tc.inkMuted, font:{family:"Inter",size:11} }, grid:{ display:false } },
+        y:{ ticks:{ color: tc.inkMuted, font:{family:"Inter",size:11}, callback:function(v){ return fmtCompact(v); } }, grid:{ color: tc.line } }
+      }
+    }
+  });
+}
+
+function renderComparisonChart(){
+  var tc = themeColors();
+  var s = sumIncomeExpense(filteredTransactions());
+  ensureChart("comparison", "chartComparison", {
+    type:"bar",
+    data:{
+      labels:["Income","Expense"],
+      datasets:[{ data:[s.income, s.expense], backgroundColor:[tc.positive, tc.negative], borderRadius:6, maxBarThickness:60 }]
+    },
+    options:{
+      indexAxis:"y", responsive:true, maintainAspectRatio:false,
+      plugins:{ legend:{ display:false }, tooltip:{ callbacks:{ label:function(ctx){ return fmtCurrency(ctx.parsed.x); } } } },
+      scales:{
+        x:{ ticks:{ color: tc.inkMuted, callback:function(v){ return fmtCompact(v); } }, grid:{ color: tc.line } },
+        y:{ ticks:{ color: tc.ink, font:{family:"Inter", size:12.5, weight:"600"} }, grid:{ display:false } }
+      }
+    }
+  });
+}
+
+function renderTrendChart(){
+  var tc = themeColors();
+  var lm = latestDataMonth();
+  var months = [];
+  if (lm){
+    var y = lm.year, m = lm.month;
+    for (var i=11; i>=0; i--){
+      var mm = m - i, yy = y;
+      while (mm <= 0){ mm += 12; yy -= 1; }
+      months.push({ year:yy, month:mm });
+    }
+  }
+  var labels = months.map(function(p){ return MONTH_SHORT[p.month-1] + " '" + String(p.year).slice(2); });
+  var data = months.map(function(p){
+    var txns = state.transactions.filter(function(t){ return t.year===p.year && t.month===p.month && t.type==="Expense"; });
+    var sum = 0; txns.forEach(function(t){ sum += t.amountOut; });
+    return sum;
+  });
+  $("#capTrend").textContent = "Trailing 12 months";
+  ensureChart("trend", "chartTrend", {
+    type:"line",
+    data:{ labels:labels, datasets:[{ label:"Expense", data:data, borderColor: tc.negative, backgroundColor: "transparent", tension:0.35, pointRadius:3, fill:false, borderWidth:2 }] },
+    options:{
+      responsive:true, maintainAspectRatio:false,
+      plugins:{ legend:{ display:false }, tooltip:{ callbacks:{ label:function(ctx){ return "Expense: " + fmtCurrency(ctx.parsed.y); } } } },
+      scales:{
+        x:{ ticks:{ color: tc.inkMuted, font:{family:"Inter",size:10.5} }, grid:{ display:false } },
+        y:{ ticks:{ color: tc.inkMuted, callback:function(v){ return fmtCompact(v); } }, grid:{ color: tc.line } }
+      }
+    }
+  });
+}
+
+/* ======================================================================
+   RENDER: ACCOUNTS
+   ====================================================================== */
+function renderAccounts(){
+  var bounds = periodBounds();
+  var cutoff = bounds.end;
+  var balances = accountBalancesAsOf(cutoff);
+  var prevBalances = bounds.prevEnd != null ? accountBalancesAsOf(bounds.prevEnd) : null;
+
+  var allNames = Object.keys(balances);
+  var hiddenCount = allNames.filter(function(n){ return balances[n] <= 0.005; }).length;
+  var names = allNames.filter(function(n){ return balances[n] > 0.005; });
+  var accounts = names.map(function(n){ return { name:n, balance: balances[n], prev: prevBalances ? (prevBalances[n]||0) : null }; });
+  accounts.sort(function(a,b){ return b.balance - a.balance; });
+
+  var totalAssets = accounts.reduce(function(s,a){ return s+a.balance; }, 0);
+
+  var grid = $("#accountsGrid");
+  grid.innerHTML = "";
+  accounts.forEach(function(a){
+    var pct = totalAssets > 0 ? (a.balance/totalAssets*100) : 0;
+    var card = el("div","account-card");
+    var deltaHtml = "";
+    if (a.prev !== null){
+      var delta = a.balance - a.prev;
+      if (Math.abs(delta) > 0.5){
+        deltaHtml = '<span class="'+(delta>=0?"kpi-delta pos":"kpi-delta neg")+'">'+(delta>=0?"+":"")+fmtCompact(delta)+'</span>';
+      }
+    }
+    card.innerHTML =
+      '<div class="account-name" title="'+escapeHtml(a.name)+'">'+escapeHtml(a.name)+'</div>' +
+      '<div class="account-balance tabular">'+fmtCurrency(a.balance)+'</div>' +
+      '<div class="account-bar"><i style="width:'+Math.max(2,pct)+'%"></i></div>' +
+      '<div class="account-foot"><span>'+pct.toFixed(1)+'% of assets</span>'+deltaHtml+'</div>';
+    grid.appendChild(card);
+  });
+  var totalCard = el("div","account-card total");
+  totalCard.innerHTML = '<div class="account-name">Total assets</div><div class="account-balance tabular">'+fmtCurrency(totalAssets)+'</div><div class="account-foot"><span>'+accounts.length+' accounts</span></div>';
+  grid.appendChild(totalCard);
+
+  $("#accountsSub").textContent = "Positive balances as of " + (bounds.label==="All time" ? "latest data" : bounds.label);
+  $("#accountsNote").textContent = hiddenCount ? hiddenCount + " account(s) with a zero or negative balance are hidden from this section and excluded from total assets." : "";
+}
+
+/* ======================================================================
+   RENDER: CATEGORIES
+   ====================================================================== */
+function renderCategoryListEl(listEl, entries, total, emptyMsg){
+  listEl.innerHTML = "";
+  if (!entries.length){
+    listEl.innerHTML = '<p style="color:var(--ink-faint);font-size:13px;">'+emptyMsg+'</p>';
+    return;
+  }
+  entries.forEach(function(e, i){
+    var pct = total ? (e.amt/total*100) : 0;
+    var color = CATEGORY_PALETTE[i % CATEGORY_PALETTE.length];
+    var row = el("div","category-row");
+    row.innerHTML =
+      '<div class="category-name-wrap"><span class="cat-dot" style="background:'+color+'"></span><span class="category-name">'+escapeHtml(e.name)+'</span></div>' +
+      '<div class="category-amt tabular">'+fmtCurrency(e.amt)+'</div>' +
+      '<div class="category-pct">'+pct.toFixed(1)+'%</div>' +
+      '<div class="category-count">'+(e.count!=null ? e.count+' txns' : '')+'</div>' +
+      '<div class="cat-bg-bar"><i style="width:'+pct+'%;background:'+color+'"></i></div>';
+    listEl.appendChild(row);
+  });
+}
+
+/* ======================================================================
+   RENDER: INCOME & EXPENSE VARIANCE ANALYSIS
+   ====================================================================== */
+function catMapToEntries(catsMap, countsMap){
+  return Object.keys(catsMap).map(function(k){ return { name:k, amt:catsMap[k], count: countsMap ? (countsMap[k]||0) : null }; })
+    .sort(function(a,b){ return b.amt - a.amt; });
+}
+
+function safeVariancePct(prev, cur){
+  if (!prev){ return cur > 0.005 ? null : (cur < -0.005 ? null : 0); } // null = "New" (no prior baseline)
+  return (cur - prev) / Math.abs(prev) * 100;
+}
+
+function computeVarianceRows(curMap, prevMap){
+  var keys = {};
+  Object.keys(curMap).forEach(function(k){ keys[k]=1; });
+  Object.keys(prevMap).forEach(function(k){ keys[k]=1; });
+  var rows = Object.keys(keys).map(function(k){
+    var cur = curMap[k]||0, prev = prevMap[k]||0;
+    return { category:k, prev:prev, cur:cur, variance: cur-prev, pct: safeVariancePct(prev, cur) };
+  });
+  rows.sort(function(a,b){ return Math.max(b.cur,b.prev) - Math.max(a.cur,a.prev); });
+  return rows;
+}
+
+function varianceTableHTML(rows, emptyMsg){
+  if (!rows.length){
+    return '<p style="color:var(--ink-faint);font-size:13px;padding:4px 2px;">'+emptyMsg+'</p>';
+  }
+  var head = '<table class="txn-table"><thead><tr><th>Category</th><th>Previous</th><th>Selected</th><th>Variance</th><th>Variance %</th></tr></thead><tbody>';
+  var body = rows.map(function(r){
+    var cls = r.variance > 0.005 ? "amt-in" : (r.variance < -0.005 ? "amt-out" : "muted-cell");
+    var sign = r.variance > 0.005 ? "+" : "";
+    var pctDisplay = r.pct === null ? '<span class="kpi-delta">New</span>' : ('<span class="kpi-delta '+(r.pct>=0?"pos":"neg")+'">'+(r.pct>=0?"+":"")+fmtPct(r.pct)+'</span>');
+    return '<tr>' +
+      '<td>'+escapeHtml(r.category)+'</td>' +
+      '<td class="tabular muted-cell">'+fmtCurrency(r.prev)+'</td>' +
+      '<td class="tabular">'+fmtCurrency(r.cur)+'</td>' +
+      '<td class="tabular '+cls+'">'+sign+fmtCurrency(r.variance)+'</td>' +
+      '<td>'+pctDisplay+'</td>' +
+      '</tr>';
+  }).join("");
+  return head + body + "</tbody></table>";
+}
+
+function renderVarianceChart(canvasId, emptyId, rows, prevLabel, curLabel){
+  var tc = themeColors();
+  var top = rows.slice(0, 8);
+  var rest = rows.slice(8);
+  var labels = top.map(function(r){ return r.category; });
+  var prevData = top.map(function(r){ return r.prev; });
+  var curData = top.map(function(r){ return r.cur; });
+  if (rest.length){
+    labels.push("Other");
+    prevData.push(rest.reduce(function(s,r){ return s+r.prev; },0));
+    curData.push(rest.reduce(function(s,r){ return s+r.cur; },0));
+  }
+  var emptyEl = document.getElementById(emptyId);
+  if (emptyEl) emptyEl.style.display = rows.length ? "none" : "flex";
+  ensureChart(canvasId, canvasId, {
+    type:"bar",
+    data:{ labels:labels, datasets:[
+      { label:prevLabel, data:prevData, backgroundColor: tc.inkFaint || tc.inkMuted, borderRadius:4, maxBarThickness:26 },
+      { label:curLabel, data:curData, backgroundColor: tc.brand, borderRadius:4, maxBarThickness:26 }
+    ] },
+    options:{
+      responsive:true, maintainAspectRatio:false,
+      plugins:{
+        legend:{ position:"top", labels:{ color: tc.inkMuted, boxWidth:10, boxHeight:10, usePointStyle:true, font:{family:"Inter",size:11} } },
+        tooltip:{ callbacks:{ label:function(ctx){ return ctx.dataset.label + ": " + fmtCurrency(ctx.parsed.y); } } }
+      },
+      scales:{
+        x:{ ticks:{ color: tc.inkMuted, font:{family:"Inter",size:10.5}, maxRotation:35, minRotation:0 }, grid:{ display:false } },
+        y:{ ticks:{ color: tc.inkMuted, callback:function(v){ return fmtCompact(v); } }, grid:{ color: tc.line } }
+      }
+    }
+  });
+}
+
+/* ======================================================================
+   RENDER: MULTI-YEAR CATEGORY TREND (matches the workbook's own
+   "Reporting" pivot — Category x Year, with year-over-year % change)
+   ====================================================================== */
+function buildYearlyCategoryMatrix(type){
+  var years = state.years.slice();
+  var byCat = {};      // category -> { year: amount }
+  var catGrand = {};   // category -> grand total
+  var yearTotals = {}; // year -> total
+  years.forEach(function(y){ yearTotals[y] = 0; });
+  state.transactions.forEach(function(t){
+    if (t.type !== type) return;
+    var amt = type === "Income" ? t.amountIn : t.amountOut;
+    if (!amt) return;
+    if (!byCat[t.category]) byCat[t.category] = {};
+    byCat[t.category][t.year] = (byCat[t.category][t.year] || 0) + amt;
+    catGrand[t.category] = (catGrand[t.category] || 0) + amt;
+    yearTotals[t.year] = (yearTotals[t.year] || 0) + amt;
+  });
+  var rows = Object.keys(byCat).map(function(cat){
+    return { category: cat, byYear: byCat[cat], grandTotal: catGrand[cat] };
+  });
+  rows.sort(function(a,b){ return b.grandTotal - a.grandTotal; });
+  var grandTotalSum = rows.reduce(function(s,r){ return s + r.grandTotal; }, 0);
+  return { years: years, rows: rows, yearTotals: yearTotals, grandTotalSum: grandTotalSum };
+}
+
+function pctCellHTML(prevAmt, amt){
+  var pct = safeVariancePct(prevAmt, amt);
+  if (pct === null) return '<td class="pct-cell">—</td>';
+  return '<td class="pct-cell '+(pct>=0?"pos":"neg")+'">'+(pct>=0?"+":"")+fmtPct(pct)+'</td>';
+}
+
+function matrixTableHTML(matrix, emptyMsg){
+  if (!matrix.rows.length){
+    return '<p style="color:var(--ink-faint);font-size:13px;">'+emptyMsg+'</p>';
+  }
+  var years = matrix.years;
+  var head = '<thead><tr><th>Category</th>';
+  years.forEach(function(y, i){
+    head += '<th>'+y+'</th>';
+    if (i > 0) head += '<th class="pct-col">%</th>';
+  });
+  head += '<th>Grand Total</th></tr></thead>';
+
+  var body = '<tbody>';
+  matrix.rows.forEach(function(r){
+    var rowHtml = '<tr><td>'+escapeHtml(r.category)+'</td>';
+    years.forEach(function(y, i){
+      var amt = r.byYear[y] || 0;
+      rowHtml += '<td class="tabular">'+(amt ? fmtCurrency(amt) : '—')+'</td>';
+      if (i > 0){
+        var prevAmt = r.byYear[years[i-1]] || 0;
+        rowHtml += pctCellHTML(prevAmt, amt);
+      }
+    });
+    rowHtml += '<td class="tabular grand-total-col">'+fmtCurrency(r.grandTotal)+'</td></tr>';
+    body += rowHtml;
+  });
+
+  var footRow = '<tr class="grand-total-row"><td>Grand Total</td>';
+  years.forEach(function(y, i){
+    var amt = matrix.yearTotals[y] || 0;
+    footRow += '<td class="tabular">'+(amt ? fmtCurrency(amt) : '—')+'</td>';
+    if (i > 0){
+      var prevAmt = matrix.yearTotals[years[i-1]] || 0;
+      footRow += pctCellHTML(prevAmt, amt);
+    }
+  });
+  footRow += '<td class="tabular">'+fmtCurrency(matrix.grandTotalSum)+'</td></tr>';
+  body += footRow + '</tbody>';
+
+  return '<table class="matrix-table">' + head + body + '</table>';
+}
+
+function renderYearlyMatrices(){
+  if (state.years.length < 1){
+    $("#expMatrixWrap").innerHTML = "";
+    $("#incMatrixWrap").innerHTML = "";
+    return;
+  }
+  var expMatrix = buildYearlyCategoryMatrix("Expense");
+  var incMatrix = buildYearlyCategoryMatrix("Income");
+  $("#expMatrixWrap").innerHTML = matrixTableHTML(expMatrix, "No expense data available.");
+  $("#incMatrixWrap").innerHTML = matrixTableHTML(incMatrix, "No income data available.");
+  var yearsSpan = state.years.length ? (state.years[0] + "–" + state.years[state.years.length-1]) : "";
+  $("#expMatrixCap").textContent = yearsSpan ? ("All years (" + yearsSpan + "), sorted by total") : "";
+  $("#incMatrixCap").textContent = yearsSpan ? ("All years (" + yearsSpan + "), sorted by total") : "";
+}
+
+function renderVarianceSection(){
+  renderYearlyMatrices();
+
+  var bounds = periodBounds();
+  var granularityLabel = (state.selectedYears.length===1 && state.selectedMonths.length===0) ? "year" : "month";
+
+  var curTxns = filteredTransactions();
+  var curSums = sumIncomeExpense(curTxns);
+
+  // Category breakdown tables (always shown when there's data for the current selection)
+  var incEntries = catMapToEntries(curSums.incomeCats);
+  var incTotal = incEntries.reduce(function(s,e){ return s+e.amt; },0);
+  renderCategoryListEl($("#varIncomeCategoryList"), incEntries, incTotal, "No income transactions in this period.");
+  $("#incCatCap").textContent = incTotal ? fmtCurrency(incTotal) + " total" : "";
+
+  var expEntries = catMapToEntries(curSums.expenseCats);
+  var expTotal = expEntries.reduce(function(s,e){ return s+e.amt; },0);
+  renderCategoryListEl($("#varExpenseCategoryList"), expEntries, expTotal, "No expense transactions in this period.");
+  $("#expCatCap").textContent = expTotal ? fmtCurrency(expTotal) + " total" : "";
+
+  $("#varianceSub").textContent = "Showing " + bounds.label.toLowerCase();
+
+  if (bounds.prevStart == null){
+    var unavailMsg = "Select exactly one year, or one year and one month (not \"All years\", a multi-select, or a custom range) to see variance analysis.";
+    $("#expVarTableWrap").innerHTML = '<p style="color:var(--ink-faint);font-size:13px;">'+unavailMsg+'</p>';
+    $("#incVarTableWrap").innerHTML = '<p style="color:var(--ink-faint);font-size:13px;">'+unavailMsg+'</p>';
+    $("#expVarCap").textContent = ""; $("#incVarCap").textContent = "";
+    renderVarianceChart("chartExpenseVariance","emptyExpVarChart", [], "Previous", "Selected");
+    return;
+  }
+
+  var prevTxns = state.transactions.filter(function(t){ return t.ts>=bounds.prevStart && t.ts<=bounds.prevEnd; });
+  var prevSums = sumIncomeExpense(prevTxns);
+  var prevLabel = bounds.prevLabel;
+  var curLabel = bounds.label;
+
+  $("#expVarCap").textContent = curLabel + " vs. " + prevLabel;
+  $("#incVarCap").textContent = curLabel + " vs. " + prevLabel;
+
+  if (!prevTxns.length){
+    var noDataMsg = "No previous " + granularityLabel + " data is available for comparison.";
+    $("#expVarTableWrap").innerHTML = '<p style="color:var(--ink-faint);font-size:13px;">'+noDataMsg+'</p>';
+    $("#incVarTableWrap").innerHTML = '<p style="color:var(--ink-faint);font-size:13px;">'+noDataMsg+'</p>';
+    renderVarianceChart("chartExpenseVariance","emptyExpVarChart", [], prevLabel, curLabel);
+    return;
+  }
+
+  var expVarRows = computeVarianceRows(curSums.expenseCats, prevSums.expenseCats);
+  var incVarRows = computeVarianceRows(curSums.incomeCats, prevSums.incomeCats);
+  $("#expVarTableWrap").innerHTML = varianceTableHTML(expVarRows, "No expense categories to compare.");
+  $("#incVarTableWrap").innerHTML = varianceTableHTML(incVarRows, "No income categories to compare.");
+  renderVarianceChart("chartExpenseVariance","emptyExpVarChart", expVarRows, prevLabel, curLabel);
+}
+
+/* ======================================================================
+   RENDER: TOP EXPENSES
+   ====================================================================== */
+function renderTopExpenses(){
+  var rows = filteredTransactions().filter(function(t){ return t.type==="Expense" && t.amountOut>0; });
+  rows.sort(function(a,b){ return b.amountOut - a.amountOut; });
+  var top = rows.slice(0, 10);
+  var body = $("#topExpBody");
+  body.innerHTML = "";
+  if (!top.length){
+    body.innerHTML = '<tr><td colspan="4" class="muted-cell" style="padding:16px 14px;">No expenses in this period.</td></tr>';
+  }
+  top.forEach(function(t){
+    var tr = el("tr");
+    tr.innerHTML =
+      '<td class="tabular">'+fmtDate(t.date)+'</td>' +
+      '<td class="desc-cell" title="'+escapeHtml(t.description)+'">'+escapeHtml(t.description || t.category)+'</td>' +
+      '<td>'+escapeHtml(t.category)+'</td>' +
+      '<td class="tabular amt-out">'+fmtCurrency(t.amountOut)+'</td>';
+    body.appendChild(tr);
+  });
+  $("#topExpSub").textContent = top.length ? ("Top " + top.length + " of " + rows.length.toLocaleString() + " expenses") : "";
+}
+
+/* ======================================================================
+   RENDER: FINANCIAL INSIGHTS (auto-generated)
+   ====================================================================== */
+function pctChange(prev, cur){
+  if (!prev && !cur) return null;
+  if (!prev) return cur > 0 ? Infinity : (cur < 0 ? -Infinity : 0);
+  return (cur - prev) / Math.abs(prev) * 100;
+}
+
+function renderFinancialInsights(){
+  var bounds = periodBounds();
+  var s = sumIncomeExpense(filteredTransactions());
+  var list = $("#insightsList");
+  var items = [];
+
+  var topCat = Object.keys(s.expenseCats).sort(function(a,b){ return s.expenseCats[b]-s.expenseCats[a]; })[0];
+  if (topCat){
+    var topCatPct = s.expense ? (s.expenseCats[topCat]/s.expense*100) : 0;
+    items.push("Your highest expense category" + (bounds.label!=="All time" ? " for " + bounds.label : "") + " is <strong>" + escapeHtml(topCat) + "</strong>, at " + fmtCurrency(s.expenseCats[topCat]) + " (" + topCatPct.toFixed(1) + "% of expenses).");
+  }
+
+  if (bounds.prevStart != null){
+    var prevTxns = state.transactions.filter(function(t){ return t.ts>=bounds.prevStart && t.ts<=bounds.prevEnd; });
+    var ps = sumIncomeExpense(prevTxns);
+    var expChange = pctChange(ps.expense, s.expense);
+    if (expChange !== null && isFinite(expChange)){
+      items.push("Your expenses " + (expChange>=0?"increased":"decreased") + " by " + Math.abs(expChange).toFixed(1) + "% compared to the previous period.");
+    }
+    var incChange = pctChange(ps.income, s.income);
+    if (incChange !== null && isFinite(incChange)){
+      items.push("Your income " + (incChange>=0?"increased":"decreased") + " by " + Math.abs(incChange).toFixed(1) + "% compared to the previous period.");
+    }
+  }
+
+  items.push(s.income >= s.expense
+    ? "Your income is higher than your expenses in this period — net cash flow of " + fmtCurrency(s.net) + "."
+    : "Your expenses exceeded your income in this period — a shortfall of " + fmtCurrency(Math.abs(s.net)) + ".");
+
+  if (s.largest.amt){
+    items.push("Your largest transaction was " + fmtCurrency(s.largest.amt) + (s.largest.desc ? " (" + escapeHtml(s.largest.desc) + ")" : "") + ".");
+  }
+
+  if (s.income > 0){
+    var rate = (s.net/s.income*100);
+    items.push(rate >= 0
+      ? "You saved " + rate.toFixed(1) + "% of your income in this period."
+      : "You spent " + Math.abs(rate).toFixed(1) + "% more than you earned in this period.");
+  }
+
+  var bal = accountBalancesAsOf(bounds.end);
+  var bestAcc = Object.keys(bal).filter(function(k){ return bal[k]>0.005; }).sort(function(a,b){ return bal[b]-bal[a]; })[0];
+  if (bestAcc){
+    items.push("Your account with the highest balance is <strong>" + escapeHtml(bestAcc) + "</strong>, at " + fmtCurrency(bal[bestAcc]) + ".");
+  }
+
+  if (state.selectedYears.length === 1 && !state.customRange){
+    var daysInPeriod = Math.round((bounds.end - bounds.start) / 86400000) + 1;
+    if (daysInPeriod > 0){
+      items.push("Average daily expense in this period was " + fmtCurrency(s.expense/daysInPeriod) + ".");
+    }
+  }
+
+  list.innerHTML = items.length
+    ? items.map(function(txt){ return '<li><span class="insight-dot"></span><span>'+txt+'</span></li>'; }).join("")
+    : '<li><span class="insight-dot"></span><span>Not enough data in this period to generate insights.</span></li>';
+}
+
+/* ======================================================================
+   RENDER: MONTH-ON-MONTH COMPARISON
+   ====================================================================== */
+function momLine(label, value, cls){
+  return '<div class="mom-line"><span class="lbl">'+label+'</span><span class="val '+(cls||"")+'">'+escapeHtml(value)+'</span></div>';
+}
+function momChangeBadge(pct, invert){
+  if (pct === null || !isFinite(pct)) return '<span class="kpi-delta">—</span>';
+  var good = invert ? pct<=0 : pct>=0;
+  return '<span class="kpi-delta '+(good?"pos":"neg")+'">'+(pct>=0?"+":"")+fmtPct(pct)+'</span>';
+}
+function renderMonthOnMonth(){
+  var bounds = periodBounds();
+  var s = sumIncomeExpense(filteredTransactions());
+  var grid = $("#momGrid");
+
+  if (bounds.prevStart == null){
+    grid.innerHTML = '<p style="grid-column:1/-1;color:var(--ink-faint);font-size:13px;">Select a specific month or year to compare it with the previous period.</p>';
+    $("#momSub").textContent = "";
+    return;
+  }
+  var prevTxns = state.transactions.filter(function(t){ return t.ts>=bounds.prevStart && t.ts<=bounds.prevEnd; });
+  var ps = sumIncomeExpense(prevTxns);
+  $("#momSub").textContent = bounds.label + " vs. previous period";
+
+  var blocks = [
+    { title:"Income", cur:s.income, prev:ps.income, cls:"pos", invert:false },
+    { title:"Expenses", cur:s.expense, prev:ps.expense, cls:"neg", invert:true },
+    { title:"Net cash flow", cur:s.net, prev:ps.net, cls: s.net>=0?"pos":"neg", invert:false }
+  ];
+  grid.innerHTML = blocks.map(function(b){
+    var pct = pctChange(b.prev, b.cur);
+    return '<div class="mom-block"><h4>'+b.title+'</h4>' +
+      momLine("Current period", fmtCurrency(b.cur), b.cls) +
+      momLine("Previous period", fmtCurrency(b.prev)) +
+      '<div class="mom-change"><span class="lbl" style="font-size:12px;color:var(--ink-muted);">Change</span>'+momChangeBadge(pct, b.invert)+'</div>' +
+      '</div>';
+  }).join("");
+}
+
+/* ======================================================================
+   RENDER: TRANSACTIONS TABLE
+   ====================================================================== */
+var TXN_COLUMNS = [
+  { key:"date", label:"Date" },
+  { key:"type", label:"Type" },
+  { key:"description", label:"Description" },
+  { key:"category", label:"Category" },
+  { key:"account", label:"Account" },
+  { key:"amountIn", label:"Income" },
+  { key:"amountOut", label:"Expense" }
+];
+var BALANCE_COLUMN = { key:"balanceAfter", label:"Balance" };
+var ACTIONS_COLUMN = { key:"actions", label:"", sortable:false };
+
+function getActiveTxnColumns(){
+  var cols = state.txnAccount !== "all" ? TXN_COLUMNS.concat([BALANCE_COLUMN]) : TXN_COLUMNS;
+  return cols.concat([ACTIONS_COLUMN]);
+}
+
+function populateTxnFilters(){
+  var types = {}, cats = {}, accs = {};
+  state.transactions.forEach(function(t){ types[t.type]=1; cats[t.category]=1; accs[t.account]=1; });
+  fillSelect($("#filterType"), Object.keys(types).sort(), "all", "All types");
+  fillSelect($("#filterCategory"), Object.keys(cats).sort(), "all", "All categories");
+  fillSelect($("#filterAccount"), Object.keys(accs).sort(), "all", "All accounts");
+}
+function fillSelect(selectEl, values, allValue, allLabel){
+  var current = selectEl.value || allValue;
+  selectEl.innerHTML = "";
+  var optAll = el("option","", allLabel); optAll.value = allValue; selectEl.appendChild(optAll);
+  values.forEach(function(v){ var o = el("option","", escapeHtml(v)); o.value = v; selectEl.appendChild(o); });
+  if (values.indexOf(current) !== -1 || current === allValue) selectEl.value = current;
+}
+
+function getTxnViewRows(){
+  var rows = filteredTransactions();
+  if (state.txnType !== "all") rows = rows.filter(function(t){ return t.type === state.txnType; });
+  if (state.txnCategory !== "all") rows = rows.filter(function(t){ return t.category === state.txnCategory; });
+  if (state.txnAccount !== "all") rows = rows.filter(function(t){ return t.account === state.txnAccount; });
+  if (state.search){
+    var q = state.search.toLowerCase();
+    rows = rows.filter(function(t){
+      return (t.description||"").toLowerCase().indexOf(q)!==-1 ||
+             (t.category||"").toLowerCase().indexOf(q)!==-1 ||
+             (t.account||"").toLowerCase().indexOf(q)!==-1 ||
+             (t.type||"").toLowerCase().indexOf(q)!==-1;
+    });
+  }
+  var col = state.sortCol, dir = state.sortDir === "asc" ? 1 : -1;
+  rows = rows.slice().sort(function(a,b){
+    var av = a[col], bv = b[col];
+    if (col === "date"){ av = a.ts; bv = b.ts; }
+    if (typeof av === "string") { av = av.toLowerCase(); bv = (bv||"").toLowerCase(); }
+    if (av < bv) return -1*dir;
+    if (av > bv) return 1*dir;
+    return 0;
+  });
+  return rows;
+}
+
+function renderTxnHead(){
+  var tr = $("#txnHeadRow");
+  tr.innerHTML = "";
+  getActiveTxnColumns().forEach(function(c){
+    if (c.sortable === false){
+      tr.appendChild(el("th","", c.label));
+      return;
+    }
+    var th = el("th","", c.label + (state.sortCol===c.key ? '<span class="sort-arrow">'+(state.sortDir==="asc"?"▲":"▼")+'</span>' : ""));
+    th.onclick = function(){
+      if (state.sortCol === c.key) state.sortDir = state.sortDir === "asc" ? "desc" : "asc";
+      else { state.sortCol = c.key; state.sortDir = c.key==="date" ? "desc" : "asc"; }
+      state.page = 1;
+      renderTransactions();
+    };
+    tr.appendChild(th);
+  });
+}
+
+var EDIT_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>';
+var DELETE_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/></svg>';
+
+function renderTransactions(){
+  renderTxnHead();
+  var rows = getTxnViewRows();
+  var totalRows = rows.length;
+  var totalPages = Math.max(1, Math.ceil(totalRows / state.pageSize));
+  state.page = clampPage(state.page, totalPages);
+  var startIdx = (state.page-1)*state.pageSize;
+  var pageRows = rows.slice(startIdx, startIdx + state.pageSize);
+  var showBalance = state.txnAccount !== "all";
+
+  var tbody = $("#txnBody");
+  tbody.innerHTML = "";
+  pageRows.forEach(function(t){
+    var tr = el("tr");
+    tr.innerHTML =
+      '<td class="tabular">'+fmtDate(t.date)+'</td>' +
+      '<td><span class="type-tag '+t.type+'">'+escapeHtml(t.type)+'</span></td>' +
+      '<td class="desc-cell" title="'+escapeHtml(t.description)+'">'+escapeHtml(t.description||"—")+(t.edited ? '<span class="edited-dot" title="Edited in this dashboard"></span>' : "")+'</td>' +
+      '<td>'+escapeHtml(t.category)+'</td>' +
+      '<td>'+escapeHtml(t.account)+'</td>' +
+      '<td class="tabular '+(t.amountIn?"amt-in":"muted-cell")+'">'+(t.amountIn ? fmtCurrency(t.amountIn) : "—")+'</td>' +
+      '<td class="tabular '+(t.amountOut?"amt-out":"muted-cell")+'">'+(t.amountOut ? fmtCurrency(t.amountOut) : "—")+'</td>' +
+      (showBalance ? '<td class="tabular balance-cell">'+fmtCurrency(t.balanceAfter)+'</td>' : "") +
+      '<td><div class="row-actions">' +
+        '<button class="row-action-btn" data-act="edit" title="Edit">'+EDIT_ICON+'</button>' +
+        '<button class="row-action-btn danger" data-act="delete" title="Delete">'+DELETE_ICON+'</button>' +
+      '</div></td>';
+    tr.querySelector('[data-act="edit"]').onclick = function(){ openEditModal(t.id); };
+    tr.querySelector('[data-act="delete"]').onclick = function(){ openDeleteConfirm(t.id); };
+    tbody.appendChild(tr);
+  });
+
+  var cardsHost = $("#txnCards");
+  cardsHost.innerHTML = "";
+  pageRows.forEach(function(t){
+    var card = el("div","txn-card");
+    var amt = t.amountIn ? '<span class="amt-in">+'+fmtCurrency(t.amountIn)+'</span>' : (t.amountOut ? '<span class="amt-out">-'+fmtCurrency(t.amountOut)+'</span>' : "—");
+    card.innerHTML =
+      '<div class="txn-card-top"><span class="type-tag '+t.type+'">'+escapeHtml(t.type)+'</span><span class="txn-card-amt">'+amt+'</span></div>' +
+      '<div class="txn-card-desc">'+escapeHtml(t.description || t.category)+(t.edited ? '<span class="edited-dot" title="Edited in this dashboard"></span>' : "")+'</div>' +
+      '<div class="txn-card-meta"><span>'+fmtDate(t.date)+'</span><span>'+escapeHtml(t.category)+'</span><span>'+escapeHtml(t.account)+'</span></div>' +
+      (showBalance ? '<div class="txn-card-balance">Balance: '+fmtCurrency(t.balanceAfter)+'</div>' : "") +
+      '<div class="txn-card-actions">' +
+        '<button class="row-action-btn" data-act="edit">'+EDIT_ICON+' Edit</button>' +
+        '<button class="row-action-btn danger" data-act="delete">'+DELETE_ICON+' Delete</button>' +
+      '</div>';
+    card.querySelector('[data-act="edit"]').onclick = function(){ openEditModal(t.id); };
+    card.querySelector('[data-act="delete"]').onclick = function(){ openDeleteConfirm(t.id); };
+    cardsHost.appendChild(card);
+  });
+
+  $("#pgInfo").textContent = totalRows === 0 ? "No transactions match" : ("Showing " + (startIdx+1) + "–" + Math.min(startIdx+state.pageSize, totalRows) + " of " + totalRows.toLocaleString());
+  $("#pgFirst").disabled = state.page<=1;
+  $("#pgPrev").disabled = state.page<=1;
+  $("#pgNext").disabled = state.page>=totalPages;
+  $("#pgLast").disabled = state.page>=totalPages;
+  $("#txnCountSub").textContent = totalRows.toLocaleString() + " transaction" + (totalRows===1?"":"s") + " in view" + (showBalance ? " — showing running balance for " + escapeHtml(state.txnAccount) : "");
+}
+
+/* ======================================================================
+   TRANSACTION EDIT / DELETE
+   ====================================================================== */
+function toDateInputValue(d){
+  var y = d.getFullYear(), m = d.getMonth()+1, day = d.getDate();
+  return y + "-" + (m<10?"0":"")+m + "-" + (day<10?"0":"")+day;
+}
+function fromDateInputValue(s){
+  var parts = String(s).split("-");
+  if (parts.length !== 3) return null;
+  var d = new Date(+parts[0], +parts[1]-1, +parts[2]);
+  return isNaN(d.getTime()) ? null : d;
+}
+function findTxnById(id){
+  for (var i=0;i<state.transactions.length;i++){ if (state.transactions[i].id === id) return state.transactions[i]; }
+  return null;
+}
+
+// Call after any add/edit/delete to keep every derived piece of state correct:
+// chronological order, running balances, the year list, persistence and every view.
+function refreshAfterDataMutation(){
+  state.transactions.sort(function(a,b){ return a.ts - b.ts; });
+  computeRunningBalances(state.transactions);
+  state.years = getAllYears();
+  state.meta.rowCount = state.transactions.length;
+  populateTxnFilters();
+  persistCurrentData().catch(function(){ /* non-fatal */ });
+  updateTopbarMeta();
+  renderAll();
+}
+
+var editingTxnId = null;
+
+function openEditModal(id){
+  var t = findTxnById(id);
+  if (!t) return;
+  editingTxnId = id;
+
+  closeAllCombos();
+  populateSuggestionLists();
+
+  $("#editType").value = t.type;
+  $("#editDate").value = toDateInputValue(t.date);
+  $("#editDescription").value = t.description || "";
+  $("#editCategory").value = t.category || "";
+  $("#editAccount").value = t.account || "";
+  $("#editAmountIn").value = t.amountIn || "";
+  $("#editAmountOut").value = t.amountOut || "";
+  $("#editTransferNote").style.display = t.type === "Transfer" ? "block" : "none";
+  $("#editTxnError").style.display = "none";
+  $("#editTxnTitle").textContent = "Edit transaction";
+  $("#editTxnModal").classList.add("show");
+}
+function closeEditModal(){
+  closeAllCombos();
+  $("#editTxnModal").classList.remove("show");
+  editingTxnId = null;
+}
+function saveEditedTransaction(){
+  var t = findTxnById(editingTxnId);
+  if (!t) { closeEditModal(); return; }
+
+  var date = fromDateInputValue($("#editDate").value);
+  if (!date){ $("#editTxnError").textContent = "Please enter a valid date."; $("#editTxnError").style.display = "block"; return; }
+
+  var account = String(comboSnap(comboOptions.account, $("#editAccount").value)).trim();
+  if (!account){ $("#editTxnError").textContent = "Account can't be empty."; $("#editTxnError").style.display = "block"; return; }
+
+  var amountIn = parseAmount($("#editAmountIn").value);
+  var amountOut = parseAmount($("#editAmountOut").value);
+
+  t.type = $("#editType").value;
+  t.date = date;
+  t.ts = date.getTime();
+  t.year = date.getFullYear();
+  t.month = date.getMonth() + 1;
+  t.description = $("#editDescription").value.trim();
+  t.category = normalizeCategory($("#editCategory").value);
+  t.account = account;
+  t.amountIn = Math.abs(amountIn);
+  t.amountOut = Math.abs(amountOut);
+  t.edited = true;
+
+  closeEditModal();
+  refreshAfterDataMutation();
+  cloudWrite(function(){ return cloudSaveRows([t]); });
+  toast("Transaction updated");
+}
+
+var deletingTxnId = null;
+
+function openDeleteConfirm(id){
+  var t = findTxnById(id);
+  if (!t) return;
+  deletingTxnId = id;
+  var amt = t.amountIn ? fmtCurrency(t.amountIn) + " in" : (t.amountOut ? fmtCurrency(t.amountOut) + " out" : "—");
+  $("#deleteTxnDetail").textContent = fmtDate(t.date) + " · " + (t.description || t.category) + " · " + amt;
+  $("#deleteTxnModal").classList.add("show");
+}
+function closeDeleteConfirm(){
+  $("#deleteTxnModal").classList.remove("show");
+  deletingTxnId = null;
+}
+function confirmDeleteTransaction(){
+  if (deletingTxnId == null) { closeDeleteConfirm(); return; }
+  var delId = deletingTxnId;
+  state.transactions = state.transactions.filter(function(t){ return t.id !== delId; });
+  closeDeleteConfirm();
+  refreshAfterDataMutation();
+  cloudWrite(function(){ return cloudDeleteRows([delId]); });
+  toast("Transaction deleted");
+}
+
+/* ======================================================================
+   SEARCHABLE DROPDOWNS (Category / Account fields)
+   Replaces the browser's built-in suggestion list, which on phones usually
+   doesn't open on tap. Tap = full list; type = filter; any new text is allowed.
+   ====================================================================== */
+var comboOptions = { category: [], account: [] };
+
+function buildComboOptions(txns){
+  var cats = {}, accs = {};
+  txns.forEach(function(x){
+    if (x.category && x.category !== "No Category") cats[x.category] = 1;
+    if (x.account) accs[x.account] = 1;
+  });
+  function sorted(o){
+    return Object.keys(o).sort(function(a, b){
+      var la = a.toLowerCase(), lb = b.toLowerCase();
+      return la < lb ? -1 : (la > lb ? 1 : 0);
+    });
+  }
+  return { category: sorted(cats), account: sorted(accs) };
+}
+
+// What the list should show for the text typed so far.
+function comboItems(options, typed, showAll, kind){
+  var t = String(typed || "").trim(), q = showAll ? "" : t.toLowerCase();
+  var starts = [], contains = [];
+  options.forEach(function(o){
+    var lo = o.toLowerCase();
+    if (!q) starts.push(o);
+    else if (lo.indexOf(q) === 0) starts.push(o);
+    else if (lo.indexOf(q) !== -1) contains.push(o);
+  });
+  var items = starts.concat(contains).map(function(o){ return { label: o, value: o, isNew: false }; });
+  if (!showAll && t && !options.some(function(o){ return o.toLowerCase() === t.toLowerCase(); })){
+    items.push({ label: "Use \u201C" + t + "\u201D as a new " + kind, value: t, isNew: true });
+  }
+  return items;
+}
+
+// "cash" typed by hand becomes the existing "Cash", so you don't create look-alike duplicates.
+function comboSnap(options, typed){
+  var t = String(typed || "").trim().toLowerCase();
+  if (!t) return typed;
+  for (var i = 0; i < options.length; i++){ if (options[i].toLowerCase() === t) return options[i]; }
+  return typed;
+}
+
+var openCombo = null, comboGlobalsBound = false;
+function closeAllCombos(){ if (openCombo) openCombo.close(); }
+
+function initCombo(inputId, kind){
+  var input = document.getElementById(inputId);
+  if (!input || input.getAttribute("data-combo")) return;
+  input.setAttribute("data-combo", "1");
+  input.removeAttribute("list");
+  input.setAttribute("autocomplete", "off");
+  input.setAttribute("autocapitalize", "words");
+  input.setAttribute("autocorrect", "off");
+  input.setAttribute("spellcheck", "false");
+
+  var wrap = document.createElement("div"); wrap.className = "combo-wrap";
+  input.parentNode.insertBefore(wrap, input);
+  wrap.appendChild(input);
+  var list = document.createElement("div"); list.className = "combo-list"; list.setAttribute("role", "listbox");
+  wrap.appendChild(list);
+
+  var items = [], active = -1, isOpen = false, showAll = true;
+  var api = { wrap: wrap, close: close, position: position };
+
+  function isTouch(){ return !!(window.matchMedia && window.matchMedia("(pointer: coarse)").matches); }
+
+  function setActive(i){
+    active = i;
+    var kids = list.children;
+    for (var k = 0; k < kids.length; k++) kids[k].classList.toggle("active", k === i);
+    if (i >= 0 && kids[i]){
+      var el = kids[i];
+      if (el.offsetTop < list.scrollTop) list.scrollTop = el.offsetTop;
+      else if (el.offsetTop + el.offsetHeight > list.scrollTop + list.clientHeight) list.scrollTop = el.offsetTop + el.offsetHeight - list.clientHeight;
+    }
+  }
+
+  function render(){
+    items = comboItems(comboOptions[kind] || [], input.value, showAll, kind);
+    list.innerHTML = "";
+    active = -1;
+    if (!items.length){
+      var e = document.createElement("div"); e.className = "combo-empty";
+      e.textContent = "No saved " + kind + "s yet \u2014 type a name";
+      list.appendChild(e);
+      return;
+    }
+    var cur = input.value.trim().toLowerCase();
+    items.forEach(function(it){
+      var d = document.createElement("div");
+      var isCur = !it.isNew && it.value.toLowerCase() === cur;
+      d.className = "combo-item" + (it.isNew ? " new" : "") + (isCur ? " current" : "");
+      d.setAttribute("role", "option");
+      d.textContent = it.label;
+      d.addEventListener("mousedown", function(e){ e.preventDefault(); });          // keep the cursor in the field
+      d.addEventListener("click", function(e){ e.preventDefault(); e.stopPropagation(); choose(it.value); });
+      list.appendChild(d);
+    });
+  }
+
+  function scrollToCurrent(){
+    var cur = list.querySelector(".combo-item.current");
+    list.scrollTop = (showAll && cur) ? Math.max(0, cur.offsetTop - 40) : 0;
+  }
+
+  // open downwards, or upwards when there is more room above (e.g. the phone keyboard is showing)
+  function position(){
+    if (!isOpen) return;
+    var r = input.getBoundingClientRect(), vv = window.visualViewport;
+    var vTop = vv ? vv.offsetTop : 0, vH = vv ? vv.height : window.innerHeight;
+    var below = (vTop + vH) - r.bottom - 10, above = r.top - vTop - 10;
+    var want = Math.min(260, list.scrollHeight);
+    var up = below < Math.min(want, 180) && above > below;
+    list.classList.toggle("up", up);
+    list.style.maxHeight = Math.max(110, Math.min(260, up ? above : below)) + "px";
+  }
+
+  function open(){
+    if (isOpen) return;
+    if (openCombo && openCombo !== api) openCombo.close();
+    isOpen = true; openCombo = api; showAll = true;
+    list.classList.add("open");
+    render(); position(); scrollToCurrent();
+    setTimeout(position, 280);                       // once more after the on-screen keyboard has finished sliding in
+  }
+  function close(){
+    if (!isOpen) return;
+    isOpen = false;
+    list.classList.remove("open"); list.classList.remove("up");
+    input.value = comboSnap(comboOptions[kind] || [], input.value);
+    if (openCombo === api) openCombo = null;
+  }
+  function choose(v){
+    input.value = v;
+    close();
+    if (isTouch()) input.blur();                     // put the phone keyboard away after picking
+  }
+
+  input.addEventListener("focus", open);
+  input.addEventListener("click", function(){ if (!isOpen) open(); });
+  input.addEventListener("input", function(){
+    if (!isOpen) open();
+    showAll = false; render(); position(); list.scrollTop = 0;
+  });
+  input.addEventListener("keydown", function(e){
+    if (e.key === "ArrowDown"){ e.preventDefault(); if (!isOpen) open(); else setActive(Math.min(items.length - 1, active + 1)); }
+    else if (e.key === "ArrowUp"){ e.preventDefault(); if (isOpen) setActive(Math.max(0, active - 1)); }
+    else if (e.key === "Enter"){ if (isOpen){ e.preventDefault(); if (active >= 0 && items[active]) choose(items[active].value); else close(); } }
+    else if (e.key === "Escape"){ if (isOpen){ e.preventDefault(); e.stopPropagation(); close(); } }
+    else if (e.key === "Tab"){ close(); }
+  });
+
+  if (!comboGlobalsBound){
+    comboGlobalsBound = true;
+    // tapping anywhere outside the open list closes it
+    document.addEventListener("pointerdown", function(e){
+      if (openCombo && !openCombo.wrap.contains(e.target)) openCombo.close();
+    }, true);
+    var reposition = function(){ if (openCombo) openCombo.position(); };
+    window.addEventListener("resize", reposition);
+    if (window.visualViewport) window.visualViewport.addEventListener("resize", reposition);
+  }
+}
+
+function initAllCombos(){
+  initCombo("addCategory", "category");
+  initCombo("addAccount", "account");
+  initCombo("addFromAccount", "account");
+  initCombo("addToAccount", "account");
+  initCombo("editCategory", "category");
+  initCombo("editAccount", "account");
+}
+
+/* ======================================================================
+   ADD TRANSACTION
+   ====================================================================== */
+function nextTxnId(){
+  if (cloud.active){
+    // two devices must never invent the same id, so use a time-based one
+    var used = {};
+    state.transactions.forEach(function(t){ used[t.id] = 1; });
+    var cid;
+    do { cid = Date.now() * 1000 + Math.floor(Math.random() * 990); } while (used[cid] || used[cid+1]);
+    return cid;
+  }
+  var max = 0;
+  state.transactions.forEach(function(t){ if (typeof t.id === "number" && t.id > max) max = t.id; });
+  return max + 1;
+}
+
+// Pure function: turns the form values into the transaction row(s) to add,
+// or returns {error}. A transfer becomes two rows, matching how the workbook stores them.
+function buildNewTransactions(f){
+  var date = fromDateInputValue(f.dateStr);
+  if (!date) return { error: "Please choose a valid date." };
+  var amount = Math.abs(parseAmount(f.amount));
+  if (!(amount > 0)) return { error: "Enter an amount greater than zero." };
+  var desc = String(f.description || "").trim();
+  var id = nextTxnId();
+  function row(rowId, type, category, account, amtIn, amtOut){
+    return {
+      id: rowId, type: type, date: date, ts: date.getTime(), year: date.getFullYear(), month: date.getMonth()+1,
+      description: desc, category: category, account: account, amountIn: amtIn, amountOut: amtOut, edited: true
+    };
+  }
+  if (f.type === "Transfer"){
+    var from = String(f.fromAccount || "").trim(), to = String(f.toAccount || "").trim();
+    if (!from || !to) return { error: "Choose both a From account and a To account." };
+    if (from.toLowerCase() === to.toLowerCase()) return { error: "From and To accounts must be different." };
+    return { txns: [ row(id, "Transfer", "No Category", from, 0, amount), row(id+1, "Transfer", "No Category", to, amount, 0) ] };
+  }
+  var account = String(f.account || "").trim();
+  if (!account) return { error: "Please enter an account." };
+  if (!String(f.category || "").trim()) return { error: "Please enter a category." };
+  var category = normalizeCategory(f.category);
+  if (f.type === "Income") return { txns: [ row(id, "Income", category, account, amount, 0) ] };
+  return { txns: [ row(id, "Expense", category, account, 0, amount) ] };
+}
+
+var addType = "Expense";
+
+function setAddType(type){
+  closeAllCombos();
+  addType = type;
+  $all("#addTypeSeg button").forEach(function(b){ b.classList.toggle("active", b.getAttribute("data-type") === type); });
+  var isT = type === "Transfer";
+  $("#addCategoryWrap").style.display = isT ? "none" : "";
+  $("#addAccountWrap").style.display = isT ? "none" : "";
+  $("#addFromWrap").style.display = isT ? "" : "none";
+  $("#addToWrap").style.display = isT ? "" : "none";
+  $("#addTransferNote").style.display = isT ? "block" : "none";
+  $("#addTxnError").style.display = "none";
+}
+
+function populateSuggestionLists(){
+  comboOptions = buildComboOptions(state.transactions);
+}
+
+function openAddModal(){
+  populateSuggestionLists();
+  $("#addDate").value = toDateInputValue(new Date());
+  $("#addAmount").value = "";
+  $("#addDescription").value = "";
+  $("#addCategory").value = "";
+  $("#addAccount").value = "";
+  $("#addFromAccount").value = "";
+  $("#addToAccount").value = "";
+  setAddType("Expense");
+  $("#addTxnModal").classList.add("show");
+  setTimeout(function(){ $("#addAmount").focus(); }, 60);
+}
+function closeAddModal(){ closeAllCombos(); $("#addTxnModal").classList.remove("show"); }
+
+function saveNewTransaction(addAnother){
+  var res = buildNewTransactions({
+    type: addType,
+    dateStr: $("#addDate").value,
+    amount: $("#addAmount").value,
+    description: $("#addDescription").value,
+    category: $("#addCategory").value,
+    account: comboSnap(comboOptions.account, $("#addAccount").value),
+    fromAccount: comboSnap(comboOptions.account, $("#addFromAccount").value),
+    toAccount: comboSnap(comboOptions.account, $("#addToAccount").value)
+  });
+  if (res.error){
+    $("#addTxnError").textContent = res.error;
+    $("#addTxnError").style.display = "block";
+    return;
+  }
+  res.txns.forEach(function(t){ state.transactions.push(t); });
+  refreshAfterDataMutation();
+  cloudWrite(function(){ return cloudSaveRows(res.txns); });
+  populateSuggestionLists();
+  if (addAnother){
+    // keep date/type/category/account so repeated entries are quick; clear what changes each time
+    $("#addAmount").value = "";
+    $("#addDescription").value = "";
+    $("#addTxnError").style.display = "none";
+    $("#addAmount").focus();
+    toast("Saved — add the next one");
+  } else {
+    closeAddModal();
+    toast(addType === "Transfer" ? "Transfer added" : "Transaction added");
+  }
+}
+
+/* ======================================================================
+   MASTER RENDER
+   ====================================================================== */
+function renderAll(){
+  renderFilterBar();
+  renderKPIs();
+  renderIncomeExpenseChart();
+  renderComparisonChart();
+  renderTrendChart();
+  renderAccounts();
+  renderVarianceSection();
+  renderTopExpenses();
+  renderFinancialInsights();
+  renderMonthOnMonth();
+  renderTransactions();
+}
+function onFilterChange(){ renderAll(); }
+
+/* ======================================================================
+   DATA LOAD / UPLOAD
+   ====================================================================== */
+function setLoading(on, text){
+  $("#loadingOverlay").classList.toggle("show", on);
+  if (text) $("#loadingText").textContent = text;
+}
+
+function ingestWorkbook(workbook, fileName){
+  var result = buildTransactionsFromWorkbook(workbook);
+  if (result.error){
+    return { ok:false, error: result.error };
+  }
+  if (!result.transactions.length){
+    return { ok:false, error: "The detected sheet ('" + result.sheetName + "') did not contain any readable transaction rows. Please check the date and amount columns." };
+  }
+  state.transactions = result.transactions;
+  computeRunningBalances(state.transactions);
+  state.years = getAllYears();
+  state.currency = detectCurrency(state.transactions);
+  state.selectedYears = [];
+  state.selectedMonths = [];
+  state.page = 1;
+  state.meta = {
+    fileName: fileName || "workbook.xlsx",
+    uploadedAt: new Date().toISOString(),
+    rowCount: state.transactions.length,
+    skipped: result.skipped,
+    sheetName: result.sheetName,
+    currency: state.currency
+  };
+  return { ok:true, skipped: result.skipped, sheetName: result.sheetName };
+}
+
+function persistCurrentData(){
+  if (cloud.active) return Promise.resolve(true);   // cloud mode: the database is the source of truth
+  var payload = {
+    meta: state.meta,
+    currency: state.currency,
+    transactions: state.transactions.map(function(t){
+      return [t.type, t.date.toISOString(), t.description, t.category, t.account, t.amountIn, t.amountOut, t.id, t.edited ? 1 : 0];
+    })
+  };
+  return dbSave(payload);
+}
+
+function restoreFromPayload(payload){
+  state.meta = payload.meta || {};
+  state.currency = payload.currency || "PKR";
+  state.transactions = (payload.transactions||[]).map(function(r, idx){
+    var date = new Date(r[1]);
+    return {
+      type:r[0], date:date, ts:date.getTime(), year:date.getFullYear(), month:date.getMonth()+1,
+      description:r[2], category:r[3], account:r[4], amountIn:r[5]||0, amountOut:r[6]||0,
+      id: r[7] != null ? r[7] : (idx+1),       // older saved data may lack an id — assign one
+      edited: r[8] === 1
+    };
+  });
+  state.transactions.sort(function(a,b){ return a.ts-b.ts; });
+  computeRunningBalances(state.transactions);
+  state.years = getAllYears();
+  state.selectedYears = [];
+  state.selectedMonths = [];
+}
+
+function activateApp(){
+  document.getElementById("welcome").style.display = "none";
+  document.getElementById("app").classList.add("active");
+  populateCurrencySelect();
+  populateTxnFilters();
+  updateTopbarMeta();
+  renderAll();
+}
+
+function updateTopbarMeta(){
+  var m = state.meta || {};
+  var uploaded = m.uploadedAt ? new Date(m.uploadedAt) : null;
+  if (cloud.active){
+    $("#topbarMeta").innerHTML = m.rowCount
+      ? '<strong>'+m.rowCount.toLocaleString()+'</strong> transactions · ☁ synced' + (cloud.user && cloud.user.email ? ' · ' + escapeHtml(cloud.user.email) : "")
+      : "";
+  } else {
+    $("#topbarMeta").innerHTML = m.rowCount
+      ? '<strong>'+m.rowCount.toLocaleString()+'</strong> transactions loaded' + (uploaded ? ' · updated ' + uploaded.toLocaleString() : "")
+      : "";
+  }
+  $("#footerLeft").textContent = m.fileName ? ("Source: " + m.fileName + (m.sheetName ? (" — sheet \""+m.sheetName+"\"") : "")) : "";
+}
+
+function populateCurrencySelect(){
+  var sel = $("#currencySelect");
+  sel.innerHTML = "";
+  Object.keys(CURRENCIES).forEach(function(code){
+    var o = el("option","", CURRENCIES[code].label); o.value = code; sel.appendChild(o);
+  });
+  sel.value = state.currency;
+}
+
+function handleFile(file){
+  if (!file) return;
+  if (cloud.active){
+    if (!cloud.user){ toast("Please sign in first"); return; }
+    if (!cloud.loaded){ toast("Still loading your cloud data — try again in a moment"); return; }
+    if (state.transactions.length &&
+        !window.confirm("Uploading this file will REPLACE all " + state.transactions.length.toLocaleString() + " transactions currently in your cloud database (including anything you added or edited on any device) with the contents of the file.\n\nContinue?")){
+      return;
+    }
+  }
+  if (typeof XLSX === "undefined"){
+    var libMsg = "The Excel-reading library hasn't finished loading (or failed to load from the CDN). Check your internet connection and reload the page, then try again.";
+    $("#welcomeError").style.display = "block";
+    $("#welcomeError").textContent = libMsg;
+    showBanner("error", escapeHtml(libMsg), "parseErrorBanner");
+    toast("Excel library not ready yet");
+    return;
+  }
+  setLoading(true, "Reading " + file.name + "…");
+  var reader = new FileReader();
+  reader.onload = function(e){
+    var workbook;
+    try {
+      var data = new Uint8Array(e.target.result);
+      // NOTE: cellDates is deliberately NOT used here. It hands date conversion
+      // to the library's internal logic, which has proven unreliable to reason
+      // about without being able to test it directly. Instead we read the raw
+      // Excel serial number for every cell and convert it ourselves in
+      // parseFlexibleDate(), using a formula independently verified against
+      // known reference points (e.g. 1 Jan 2020 = serial 43831).
+      workbook = XLSX.read(data, { type:"array" });
+    } catch (err){
+      setLoading(false);
+      var pmsg = "This file could not be parsed as an Excel workbook (" + (err && err.message ? err.message : "unknown error") + "). Make sure it's a valid .xlsx/.xlsm file.";
+      $("#welcomeError").style.display = "block";
+      $("#welcomeError").textContent = pmsg;
+      showBanner("error", escapeHtml(pmsg), "parseErrorBanner");
+      return;
+    }
+    try {
+      var res = ingestWorkbook(workbook, file.name);
+      setLoading(false);
+      if (!res.ok){
+        $("#welcomeError").style.display = "block";
+        $("#welcomeError").textContent = res.error;
+        showBanner("error", escapeHtml(res.error), "parseErrorBanner");
+        toast("Could not read that workbook");
+        return;
+      }
+      $("#welcomeError").style.display = "none";
+      activateApp();
+      if (res.skipped){
+        showBanner("warn", res.skipped + " row(s) were skipped because a date or type could not be detected.", "skippedBanner");
+      }
+      if (typeof Chart === "undefined"){
+        showBanner("warn", "Your data loaded correctly, but the charting library couldn't be reached — charts are hidden until you reload with internet access. KPIs, accounts, and transactions are unaffected.", "chartLibBanner");
+      }
+      if (cloud.active){ cloudWrite(function(){ return cloudReplaceAll(state.transactions); }); }
+      else { persistCurrentData().catch(function(){ /* non-fatal */ }); }
+      toast("Loaded " + state.meta.rowCount.toLocaleString() + " transactions from " + file.name);
+    } catch (err){
+      setLoading(false);
+      var msg = "Your workbook was read, but something went wrong while building the dashboard (" + (err && err.message ? err.message : "unknown error") + ").";
+      $("#welcomeError").style.display = "block";
+      $("#welcomeError").textContent = msg;
+      showBanner("error", escapeHtml(msg), "parseErrorBanner");
+    }
+  };
+  reader.onerror = function(){
+    setLoading(false);
+    toast("Could not read the file from disk");
+  };
+  reader.readAsArrayBuffer(file);
+}
+
+/* ======================================================================
+   SAMPLE DATA (demo)
+   ====================================================================== */
+function generateSampleWorkbook(){
+  var cats = ["Groceries","Rent","Transport","Dining","Utilities","Entertainment","Health","Shopping"];
+  var accounts = ["Checking","Savings","Cash"];
+  var rows = [["Voucher Type","Voucher Date","Description","Category Name","Account Name","DR","CR"]];
+  var d = new Date(); d.setMonth(d.getMonth()-11); d.setDate(1);
+  var today = new Date();
+  // Dates are written as Excel serial numbers (via excelSerialDate), the same
+  // representation a real uploaded file uses — so the demo data exercises the
+  // exact same, verified parsing path as real data, instead of a separate one.
+  while (d <= today){
+    var y = d.getFullYear(), m = d.getMonth();
+    rows.push(["Income", excelSerialDate(new Date(y,m,1)), "Monthly salary", "Salary", "Checking", 5200 + Math.round(Math.random()*300), ""]);
+    if (Math.random() > 0.6) rows.push(["Income", excelSerialDate(new Date(y,m,14)), "Freelance work", "Other Income", "Checking", 200+Math.round(Math.random()*500), ""]);
+    var numExpenses = 10 + Math.floor(Math.random()*8);
+    for (var i=0; i<numExpenses; i++){
+      var day = 1 + Math.floor(Math.random()*27);
+      var cat = cats[Math.floor(Math.random()*cats.length)];
+      var amt = Math.round(20 + Math.random()*400);
+      rows.push(["Expense", excelSerialDate(new Date(y,m,day)), cat + " purchase", cat, accounts[Math.floor(Math.random()*accounts.length)], "", amt]);
+    }
+    rows.push(["Transfer", excelSerialDate(new Date(y,m,5)), "To savings", "No Category", "Checking", "", 500]);
+    rows.push(["Transfer", excelSerialDate(new Date(y,m,5)), "To savings", "No Category", "Savings", 500, ""]);
+    d.setMonth(d.getMonth()+1);
+  }
+  var ws = XLSX.utils.aoa_to_sheet(rows);
+  var wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, "Main Data");
+  return wb;
+}
+
+/* ======================================================================
+   EXPORT / PRINT
+   ====================================================================== */
+function exportCsv(){
+  var rows = getTxnViewRows();
+  var showBalance = state.txnAccount !== "all";
+  var header = ["Date","Type","Description","Category","Account","Income","Expense"];
+  if (showBalance) header.push("Balance");
+  var lines = [header.join(",")];
+  rows.forEach(function(t){
+    var line = [
+      fmtDate(t.date),
+      t.type,
+      '"'+String(t.description||"").replace(/"/g,'""')+'"',
+      '"'+String(t.category||"").replace(/"/g,'""')+'"',
+      '"'+String(t.account||"").replace(/"/g,'""')+'"',
+      t.amountIn || "",
+      t.amountOut || ""
+    ];
+    if (showBalance) line.push(t.balanceAfter != null ? t.balanceAfter : "");
+    lines.push(line.join(","));
+  });
+  var blob = new Blob([lines.join("\n")], { type:"text/csv;charset=utf-8;" });
+  var url = URL.createObjectURL(blob);
+  var a = document.createElement("a");
+  a.href = url; a.download = "transactions_export.csv";
+  document.body.appendChild(a); a.click(); a.remove();
+  URL.revokeObjectURL(url);
+  toast("Exported " + rows.length + " transactions");
+}
+
+// Converts a local-midnight calendar date into the exact Excel "1900 date system"
+// serial number, computed directly rather than relying on a library's internal
+// Date handling — verified against the well-known reference point (1 Jan 2020 = 43831).
+function excelSerialDate(d){
+  return Math.round(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()) / 86400000) + 25569;
+}
+
+function exportWorkbookXlsx(){
+  if (typeof XLSX === "undefined"){
+    toast("Excel library not available right now — try again once the page finishes loading");
+    return;
+  }
+  if (!state.transactions.length){
+    toast("No data to export yet");
+    return;
+  }
+  var header = ["Voucher Type","Voucher Date","Description","Category Name","Account Name","DR","CR"];
+  var rows = [header];
+  // Export the FULL dataset (not just the current filter/search) — this is meant
+  // to be a complete, updated replacement for the transactions in your workbook.
+  state.transactions.slice().sort(function(a,b){ return a.ts - b.ts; }).forEach(function(t){
+    rows.push([
+      t.type,
+      excelSerialDate(t.date),
+      t.description || "",
+      t.category || "",
+      t.account || "",
+      t.amountIn || "",
+      t.amountOut || ""
+    ]);
+  });
+  var ws = XLSX.utils.aoa_to_sheet(rows);
+  // Mark the date column's cells as real Excel dates with a display format,
+  // rather than leaving them as plain numbers.
+  var range = XLSX.utils.decode_range(ws["!ref"]);
+  for (var r = 1; r <= range.e.r; r++){
+    var addr = XLSX.utils.encode_cell({ r:r, c:1 });
+    if (ws[addr]){ ws[addr].t = "n"; ws[addr].z = "dd/mm/yyyy"; }
+  }
+  ws["!cols"] = [ {wch:14},{wch:12},{wch:28},{wch:18},{wch:20},{wch:12},{wch:12} ];
+  var wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, "Main Data");
+  var out = XLSX.write(wb, { type:"array", bookType:"xlsx" });
+  var blob = new Blob([out], { type:"application/octet-stream" });
+  var url = URL.createObjectURL(blob);
+  var a = document.createElement("a");
+  var fname = (state.meta.fileName || "workbook").replace(/\.(xlsx|xlsm|xls)$/i, "");
+  a.href = url; a.download = fname + "_updated.xlsx";
+  document.body.appendChild(a); a.click(); a.remove();
+  URL.revokeObjectURL(url);
+  toast("Downloaded " + state.transactions.length.toLocaleString() + " transactions as an Excel file");
+}
+
+/* ======================================================================
+   THEME
+   ====================================================================== */
+function applyTheme(theme){
+  document.documentElement.setAttribute("data-theme", theme);
+  state.theme = theme;
+  localStorage.setItem("ledgerline_theme", theme);
+  if (document.getElementById("app").classList.contains("active")){
+    renderIncomeExpenseChart(); renderComparisonChart(); renderTrendChart();
+    renderAccounts(); renderVarianceSection();
+  }
+}
+
+/* ======================================================================
+   EVENT WIRING
+   ====================================================================== */
+function wireEvents(){
+  var fileInput = $("#fileInput");
+  $("#btnUploadWelcome").onclick = function(){ fileInput.click(); };
+  $("#btnUploadTop").onclick = function(){ fileInput.click(); };
+  fileInput.onchange = function(e){ handleFile(e.target.files[0]); fileInput.value=""; };
+
+  $("#btnSample").onclick = function(){
+    if (typeof XLSX === "undefined"){
+      toast("Excel library not ready yet — check your connection and try again in a moment");
+      return;
+    }
+    setLoading(true, "Building demo data…");
+    setTimeout(function(){
+      var wb = generateSampleWorkbook();
+      var res = ingestWorkbook(wb, "Sample data (demo)");
+      setLoading(false);
+      if (res.ok){
+        activateApp();
+        toast("Loaded sample data — upload your own anytime");
+        if (typeof Chart === "undefined"){
+          showBanner("warn", "Charts are hidden because the charting library couldn't be reached from the CDN. Everything else is working normally.", "chartLibWarnBanner");
+        }
+      }
+    }, 150);
+  };
+
+  $("#btnTheme").onclick = function(){ applyTheme(state.theme === "dark" ? "light" : "dark"); };
+
+  $("#currencySelect").onchange = function(e){
+    state.currency = e.target.value; renderAll();
+    if (cloud.active && cloud.user){ cloudCol().doc("meta").set({ currency: state.currency }, { merge:true }).catch(function(){}); }
+  };
+
+  $("#btnExportCsv").onclick = exportCsv;
+  $("#btnExportWorkbook").onclick = exportWorkbookXlsx;
+  $("#btnPrint").onclick = function(){ window.print(); };
+
+  $("#btnReset").onclick = function(){ $("#resetModal").classList.add("show"); };
+  $("#cancelReset").onclick = function(){ $("#resetModal").classList.remove("show"); };
+  $("#confirmReset").onclick = function(){
+    dbClear().finally(function(){
+      location.reload();
+    });
+  };
+
+  $("#cancelEditTxn").onclick = closeEditModal;
+  $("#saveEditTxn").onclick = saveEditedTransaction;
+  $("#editTxnModal").onclick = function(e){ if (e.target.id === "editTxnModal") closeEditModal(); };
+  $("#editType").onchange = function(e){ $("#editTransferNote").style.display = e.target.value === "Transfer" ? "block" : "none"; };
+
+  $("#cancelDeleteTxn").onclick = closeDeleteConfirm;
+  $("#confirmDeleteTxn").onclick = confirmDeleteTransaction;
+  $("#deleteTxnModal").onclick = function(e){ if (e.target.id === "deleteTxnModal") closeDeleteConfirm(); };
+
+  $("#btnSignIn").onclick = function(){ doAuth(false); };
+  $("#btnCreateAccount").onclick = function(){ doAuth(true); };
+  $("#authPassword").onkeydown = function(e){ if (e.key === "Enter") doAuth(false); };
+  $("#btnSignOut").onclick = function(){ if (cloud.auth) cloud.auth.signOut(); };
+
+  initAllCombos();
+  $("#btnAddTxn").onclick = openAddModal;
+  $("#cancelAddTxn").onclick = closeAddModal;
+  $("#saveAddTxn").onclick = function(){ saveNewTransaction(false); };
+  $("#saveAddAnother").onclick = function(){ saveNewTransaction(true); };
+  $("#addTxnModal").onclick = function(e){ if (e.target.id === "addTxnModal") closeAddModal(); };
+  $all("#addTypeSeg button").forEach(function(b){ b.onclick = function(){ setAddType(b.getAttribute("data-type")); }; });
+
+  $("#txnSearch").oninput = debounce(function(e){ state.search = e.target.value; state.page=1; renderTransactions(); }, 200);
+  $("#filterType").onchange = function(e){ state.txnType = e.target.value; state.page=1; renderTransactions(); };
+  $("#filterCategory").onchange = function(e){ state.txnCategory = e.target.value; state.page=1; renderTransactions(); };
+  $("#filterAccount").onchange = function(e){ state.txnAccount = e.target.value; state.page=1; renderTransactions(); };
+
+  $("#btnResetFilters").onclick = function(){
+    state.selectedYears = []; state.selectedMonths = []; state.customRange = null;
+    state.search=""; state.txnType="all"; state.txnCategory="all"; state.txnAccount="all"; state.page=1;
+    $("#txnSearch").value = ""; $("#rangeStart").value = ""; $("#rangeEnd").value = "";
+    renderAll();
+    toast("Filters reset");
+  };
+  $("#btnApplyRange").onclick = function(){
+    var sv = $("#rangeStart").value, ev = $("#rangeEnd").value;
+    if (!sv || !ev){ toast("Pick both a start and end date"); return; }
+    var s = new Date(sv + "T00:00:00").getTime();
+    var e = new Date(ev + "T23:59:59").getTime();
+    if (isNaN(s) || isNaN(e) || s > e){ toast("That date range isn't valid"); return; }
+    state.customRange = { start:s, end:e };
+    state.page = 1;
+    renderAll();
+  };
+  $("#btnClearRange").onclick = function(){
+    state.customRange = null;
+    $("#rangeStart").value = ""; $("#rangeEnd").value = "";
+    state.page = 1;
+    renderAll();
+  };
+
+  $("#pgFirst").onclick = function(){ state.page=1; renderTransactions(); };
+  $("#pgPrev").onclick = function(){ state.page=Math.max(1,state.page-1); renderTransactions(); };
+  $("#pgNext").onclick = function(){ state.page=state.page+1; renderTransactions(); };
+  $("#pgLast").onclick = function(){ state.page=1e9; renderTransactions(); };
+
+  // drag and drop onto welcome screen
+  ["dragover","drop"].forEach(function(evt){
+    document.getElementById("welcome").addEventListener(evt, function(e){ e.preventDefault(); });
+  });
+  document.getElementById("welcome").addEventListener("drop", function(e){
+    if (e.dataTransfer.files && e.dataTransfer.files[0]) handleFile(e.dataTransfer.files[0]);
+  });
+}
+function debounce(fn, wait){
+  var t;
+  return function(){
+    var args = arguments;
+    clearTimeout(t);
+    t = setTimeout(function(){ fn.apply(null, args); }, wait);
+  };
+}
+
+/* ======================================================================
+   CLOUD SYNC (Firebase: email/password sign-in + Firestore)
+   Data layout:  users/{uid}/data/meta     -> file name, currency, ...
+                 users/{uid}/data/c0000... -> chunks of ~500 transactions, each
+                                              stored as a JSON string (Firestore
+                                              can't nest arrays, and 1 MiB per doc).
+   ====================================================================== */
+var cloud = { active:false, authChecked:false, user:null, auth:null, db:null, unsub:null, chunks:{}, rowChunk:{}, meta:{}, loaded:false };
+var CHUNK_TARGET = 500, CHUNK_SOFT_MAX = 600;
+
+function cloudCol(){ return cloud.db.collection("users").doc(cloud.user.uid).collection("data"); }
+function chunkIdFor(n){ return "c" + ("0000" + n).slice(-4); }
+function chunkIndexOf(cid){ return parseInt(cid.slice(1), 10); }
+
+// dates are stored as Excel serial numbers: no time zones involved, ever.
+function serializeTxn(t){
+  return [t.id, t.type, excelSerialDate(t.date), t.description || "", t.category || "", t.account || "", t.amountIn || 0, t.amountOut || 0, t.edited ? 1 : 0];
+}
+function deserializeRow(r){
+  var date = parseFlexibleDate(r[2]);
+  if (!date) return null;
+  return {
+    id: r[0], type: r[1], date: date, ts: date.getTime(), year: date.getFullYear(), month: date.getMonth() + 1,
+    description: r[3], category: r[4], account: r[5], amountIn: r[6] || 0, amountOut: r[7] || 0, edited: r[8] === 1
+  };
+}
+
+function appIsActive(){ return $("#app").classList.contains("active"); }
+
+// Rebuilds everything on screen from the latest chunks received from the cloud.
+function cloudRebuildFromChunks(){
+  var txns = [], seen = {};
+  cloud.rowChunk = {};
+  Object.keys(cloud.chunks).sort().forEach(function(cid){
+    cloud.chunks[cid].forEach(function(r){
+      if (seen[r[0]]) return;
+      var t = deserializeRow(r);
+      if (!t) return;
+      seen[r[0]] = 1; cloud.rowChunk[r[0]] = cid; txns.push(t);
+    });
+  });
+  txns.sort(function(a, b){ return a.ts - b.ts; });
+  state.transactions = txns;
+  computeRunningBalances(txns);
+  state.years = getAllYears();
+  var m = cloud.meta || {};
+  if (m.currency && CURRENCIES[m.currency]) state.currency = m.currency;
+  state.meta = { fileName: m.fileName || "Cloud data", uploadedAt: m.uploadedAt, rowCount: txns.length, sheetName: m.sheetName, currency: state.currency };
+  cloud.loaded = true;
+  updateCloudChrome();
+  if (!txns.length){ showWelcomeForCloud(); return; }
+  if (!appIsActive()){ activateApp(); }
+  else { populateCurrencySelect(); populateTxnFilters(); updateTopbarMeta(); renderAll(); }
+}
+
+function cloudApplySnapshot(docs){
+  var chunks = {}, meta = {};
+  docs.forEach(function(d){
+    if (d.id === "meta"){ meta = d.data || {}; return; }
+    try { chunks[d.id] = JSON.parse((d.data && d.data.data) || "[]"); } catch (e){ chunks[d.id] = []; }
+  });
+  cloud.chunks = chunks; cloud.meta = meta;
+  cloudRebuildFromChunks();
+}
+
+function cloudOpenChunkId(){
+  var ids = Object.keys(cloud.chunks).sort();
+  if (!ids.length) return chunkIdFor(0);
+  var last = ids[ids.length - 1];
+  if (cloud.chunks[last].length >= CHUNK_SOFT_MAX) return chunkIdFor(chunkIndexOf(last) + 1);
+  return last;
+}
+
+// Adds or updates rows. Each affected chunk is read and rewritten inside a
+// database transaction, so two devices saving at the same moment can't erase each other.
+function cloudSaveRows(txns){
+  var col = cloudCol(), openId = cloudOpenChunkId(), groups = {};
+  txns.forEach(function(t){
+    var cid = cloud.rowChunk[t.id] || openId;
+    (groups[cid] = groups[cid] || []).push(t);
+  });
+  var cids = Object.keys(groups);
+  return cloud.db.runTransaction(function(tx){
+    return Promise.all(cids.map(function(cid){ return tx.get(col.doc(cid)); })).then(function(snaps){
+      snaps.forEach(function(snap, i){
+        var cid = cids[i];
+        var rows = snap.exists ? JSON.parse(snap.data().data || "[]") : [];
+        groups[cid].forEach(function(t){
+          var s = serializeTxn(t), idx = -1;
+          for (var j = 0; j < rows.length; j++){ if (rows[j][0] === t.id){ idx = j; break; } }
+          if (idx >= 0) rows[idx] = s; else rows.push(s);
+        });
+        tx.set(col.doc(cid), { data: JSON.stringify(rows), n: rows.length });
+      });
+    });
+  });
+}
+
+function cloudDeleteRows(ids){
+  var col = cloudCol(), groups = {};
+  ids.forEach(function(id){
+    var cid = cloud.rowChunk[id];
+    if (cid) (groups[cid] = groups[cid] || []).push(id);
+  });
+  var cids = Object.keys(groups);
+  if (!cids.length) return Promise.resolve();
+  return cloud.db.runTransaction(function(tx){
+    return Promise.all(cids.map(function(cid){ return tx.get(col.doc(cid)); })).then(function(snaps){
+      snaps.forEach(function(snap, i){
+        var cid = cids[i];
+        if (!snap.exists) return;
+        var drop = {}; groups[cid].forEach(function(id){ drop[id] = 1; });
+        var rows = JSON.parse(snap.data().data || "[]").filter(function(r){ return !drop[r[0]]; });
+        tx.set(col.doc(cid), { data: JSON.stringify(rows), n: rows.length });
+      });
+    });
+  });
+}
+
+// Replaces the whole cloud dataset (used when you upload an Excel file).
+function cloudReplaceAll(txns){
+  var col = cloudCol();
+  var sorted = txns.slice().sort(function(a, b){ return a.id - b.id; });
+  var fresh = {};
+  for (var i = 0; i < sorted.length; i += CHUNK_TARGET){
+    fresh[chunkIdFor(i / CHUNK_TARGET)] = sorted.slice(i, i + CHUNK_TARGET).map(serializeTxn);
+  }
+  var batch = cloud.db.batch();
+  Object.keys(cloud.chunks).forEach(function(cid){ if (!fresh[cid]) batch.delete(col.doc(cid)); });
+  Object.keys(fresh).forEach(function(cid){ batch.set(col.doc(cid), { data: JSON.stringify(fresh[cid]), n: fresh[cid].length }); });
+  batch.set(col.doc("meta"), {
+    fileName: state.meta.fileName || "workbook.xlsx", uploadedAt: state.meta.uploadedAt || new Date().toISOString(),
+    sheetName: state.meta.sheetName || "", currency: state.currency, rowCount: txns.length
+  });
+  return batch.commit();
+}
+
+// Runs a cloud write. If it fails (offline, signed out, rules...), the screen is
+// put back to what the cloud actually holds, so you never see data that wasn't saved.
+function cloudWrite(factory){
+  if (!cloud.active) return;
+  var p;
+  try { p = factory(); } catch (e){ p = Promise.reject(e); }
+  Promise.resolve(p).catch(function(err){
+    if (window.console) console.error("Cloud save failed:", err);
+    toast("Couldn't save to the cloud — check your connection. That change was NOT saved.", 6000);
+    cloudRebuildFromChunks();
+  });
+}
+
+function authErrorMessage(err){
+  var c = (err && err.code) || "";
+  var map = {
+    "auth/invalid-email": "That email address doesn't look right.",
+    "auth/user-not-found": "No account with that email yet — tap “Create account”.",
+    "auth/wrong-password": "Wrong password.",
+    "auth/invalid-credential": "Wrong email or password (or the account doesn't exist yet — tap “Create account”).",
+    "auth/email-already-in-use": "An account with that email already exists — tap “Sign in”.",
+    "auth/weak-password": "Password must be at least 6 characters.",
+    "auth/too-many-requests": "Too many attempts. Wait a few minutes and try again.",
+    "auth/network-request-failed": "No internet connection.",
+    "auth/operation-not-allowed": "Email/password sign-in isn't switched on in your Firebase project (Authentication → Sign-in method).",
+    "auth/admin-restricted-operation": "New accounts are switched off in your Firebase project."
+  };
+  return map[c] || ("Couldn't sign in (" + (c || (err && err.message) || "unknown error") + ").");
+}
+function showAuthError(msg){ var e = $("#authError"); e.textContent = msg; e.style.display = "block"; }
+
+function doAuth(create){
+  var email = $("#authEmail").value.trim(), pw = $("#authPassword").value;
+  if (!email || !pw){ showAuthError("Enter your email and password."); return; }
+  $("#authError").style.display = "none";
+  setLoading(true, create ? "Creating your account…" : "Signing in…");
+  var p = create ? cloud.auth.createUserWithEmailAndPassword(email, pw) : cloud.auth.signInWithEmailAndPassword(email, pw);
+  p.then(function(){ setLoading(false); }).catch(function(err){ setLoading(false); showAuthError(authErrorMessage(err)); });
+}
+
+function updateCloudChrome(){
+  $("#btnSignOut").style.display = (cloud.active && cloud.user) ? "" : "none";
+  if (cloud.active) $("#btnReset").style.display = "none";   // wiping the shared cloud data from a toolbar icon is too easy to do by accident
+  $("#btnSample").style.display = cloud.active ? "none" : "";
+}
+
+function showWelcomeForCloud(){
+  $("#app").classList.remove("active");
+  $("#welcome").style.display = "";
+  updateWelcomeForCloud();
+}
+
+function updateWelcomeForCloud(){
+  if (!cloud.active) return;
+  var panel = $("#authPanel"), actions = $("#welcomeActions"), info = $("#cloudWelcomeInfo");
+  if (!cloud.authChecked){
+    panel.style.display = "none"; actions.style.display = "none";
+    info.style.display = "block"; info.textContent = "Checking sign-in…";
+    return;
+  }
+  if (!cloud.user){
+    panel.style.display = "block"; actions.style.display = "none"; info.style.display = "none";
+    return;
+  }
+  panel.style.display = "none";
+  info.style.display = "block";
+  var who = escapeHtml(cloud.user.email || "your account");
+  if (!cloud.loaded){
+    actions.style.display = "none";
+    info.innerHTML = 'Signed in as ' + who + '. Loading your data… <a class="welcome-link" id="signOutLink">Sign out</a>';
+  } else {
+    actions.style.display = "";
+    info.innerHTML = 'Signed in as ' + who + '. Your cloud database is empty — upload your Excel file once to get started. <a class="welcome-link" id="signOutLink">Sign out</a>';
+  }
+  var so = $("#signOutLink");
+  if (so) so.onclick = function(){ cloud.auth.signOut(); };
+}
+
+function onCloudAuth(user){
+  cloud.authChecked = true;
+  cloud.user = user || null;
+  if (cloud.unsub){ cloud.unsub(); cloud.unsub = null; }
+  cloud.chunks = {}; cloud.rowChunk = {}; cloud.meta = {}; cloud.loaded = false;
+  updateCloudChrome();
+  if (!user){
+    state.transactions = []; state.meta = {};
+    $("#app").classList.remove("active");
+    $("#welcome").style.display = "";
+    updateWelcomeForCloud();
+    return;
+  }
+  updateWelcomeForCloud();
+  cloud.unsub = cloudCol().onSnapshot(function(snap){
+    var docs = [];
+    snap.forEach(function(d){ docs.push({ id: d.id, data: d.data() }); });
+    cloudApplySnapshot(docs);
+  }, function(err){
+    var msg = (err && err.code === "permission-denied")
+      ? "The database refused access. In Firebase → Firestore Database → Rules, paste the security rules from the setup guide and click Publish."
+      : "Couldn't load your cloud data (" + ((err && err.message) || err) + ").";
+    $("#welcome").style.display = "";
+    $("#app").classList.remove("active");
+    $("#welcomeError").style.display = "block"; $("#welcomeError").textContent = msg;
+  });
+}
+
+function initCloud(){
+  try {
+    firebase.initializeApp(window.FIREBASE_CONFIG);
+    cloud.auth = firebase.auth();
+    cloud.db = firebase.firestore();
+    try { cloud.db.settings({ experimentalAutoDetectLongPolling: true }); } catch (e) { /* older SDKs: ignore */ }
+    cloud.active = true;
+  } catch (e){
+    $("#welcomeError").style.display = "block";
+    $("#welcomeError").textContent = "Cloud sync couldn't start (" + (e && e.message ? e.message : e) + "). Check the Firebase settings at the top of the file.";
+    return false;
+  }
+  $("#welcomeSub").textContent = "Sign in to open your dashboard. Your data lives in your own private cloud database, so your phone and laptop always show the same numbers.";
+  $("#welcomeNoteText").textContent = "Only you can read your data — it's protected by your sign-in.";
+  updateCloudChrome();
+  updateWelcomeForCloud();
+  cloud.auth.onAuthStateChanged(onCloudAuth);
+  return true;
+}
+
+/* ======================================================================
+   MOBILE: hide the filter bar when scrolling down; it comes back only when you
+   reach the top of the page (phones only — on laptop/desktop nothing changes)
+   ====================================================================== */
+function initMobileFilterAutoHide(){
+  var bar = document.querySelector(".filterbar");
+  if (!bar || !window.matchMedia) return;
+  var mq = window.matchMedia("(max-width: 720px)");
+  var THRESHOLD = 8;            // ignore tiny movements so it doesn't flicker
+  var TOP_ZONE = 10;            // within this many px of the top: always visible
+  var lastY = 0, ticking = false, hidden = false, lockUntil = 0;
+
+  function currentY(){
+    return Math.max(0, window.pageYOffset || document.documentElement.scrollTop || 0);   // clamp iOS rubber-band overscroll
+  }
+  function setHidden(h){
+    if (h === hidden) return;
+    hidden = h;
+    bar.classList.toggle("is-hidden-mobile", h);
+  }
+  function update(){
+    ticking = false;
+    var y = currentY();
+    if (!mq.matches){ setHidden(false); lastY = y; return; }          // desktop / laptop: never hide
+    if (y <= TOP_ZONE){ setHidden(false); lastY = y; return; }        // at the top: everything visible
+    var dy = y - lastY;
+    if (Math.abs(dy) < THRESHOLD) return;                             // small move: wait until it adds up
+    if (dy > 0){
+      var a = document.activeElement;
+      var typingInFilters = a && a !== document.body && bar.contains(a);   // e.g. date picker is open
+      if (Date.now() >= lockUntil && !typingInFilters) setHidden(true);
+    }
+    // scrolling back UP does nothing: the filters stay hidden until you reach the top of the page
+    lastY = y;
+  }
+  function onScroll(){
+    if (!ticking){ ticking = true; window.requestAnimationFrame(update); }
+  }
+  // After touching a filter, the page re-renders and its height can change; don't hide because of that.
+  function lock(){ lockUntil = Date.now() + 700; }
+  bar.addEventListener("pointerdown", lock, { passive:true });
+  bar.addEventListener("touchstart", lock, { passive:true });
+  bar.addEventListener("focusin", lock);
+
+  window.addEventListener("scroll", onScroll, { passive:true });
+  window.addEventListener("resize", function(){
+    // phones fire "resize" whenever the address bar slides in or out while scrolling — that must not reveal the filters
+    if (!mq.matches) setHidden(false);
+    lastY = currentY();
+  });
+  var onChange = function(){
+    // crossing the phone/desktop width: desktop always shows them; on a phone, show only at the top
+    setHidden(mq.matches && currentY() > TOP_ZONE);
+    lastY = currentY();
+  };
+  if (mq.addEventListener) mq.addEventListener("change", onChange); else if (mq.addListener) mq.addListener(onChange);
+  lastY = currentY();
+}
+
+/* ======================================================================
+   BOOT
+   ====================================================================== */
+function boot(){
+  wireEvents();
+  initMobileFilterAutoHide();
+  var savedTheme = localStorage.getItem("ledgerline_theme") || (window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
+  document.documentElement.setAttribute("data-theme", savedTheme);
+  state.theme = savedTheme;
+
+  $("#welcomeStatus").textContent = "Loading dashboard libraries…";
+  var libsReady = (window.__loadExternalLibraries ? window.__loadExternalLibraries() : Promise.resolve());
+
+  libsReady.then(function(){
+    var status = window.__LEDGERLINE_LIB_STATUS || {};
+    if (window.FIREBASE_CONFIG){
+      if (status.firebase && initCloud()){
+        $("#welcomeStatus").textContent = "";
+        return null;                       // cloud mode: data comes from the cloud, not from this browser
+      }
+      if (!status.firebase){
+        $("#welcomeError").style.display = "block";
+        $("#welcomeError").textContent = "Cloud sync couldn't load (check your internet connection or ad-blocker and reload). Running in this-device-only mode for now.";
+      }
+    }
+    if (!status.xlsx){
+      var xmsg = "The Excel-reading library couldn't be reached from any CDN source. Check your internet connection, firewall, or ad-blocker, then reload the page before uploading.";
+      $("#welcomeError").style.display = "block";
+      $("#welcomeError").textContent = xmsg;
+    } else if (!status.chart){
+      $("#welcomeStatus").textContent = "Note: the charting library is unavailable right now — figures and tables will still work, but charts won't render until you reload with a working connection.";
+    } else {
+      $("#welcomeStatus").textContent = "";
+    }
+    $("#welcomeStatus2").textContent = "Checking for previously imported data…";
+    return dbLoad();
+  }).then(function(payload){
+    $("#welcomeStatus2").textContent = "";
+    if (payload && payload.transactions && payload.transactions.length){
+      restoreFromPayload(payload);
+      activateApp();
+      toast("Restored your previously imported data");
+      if (!(window.__LEDGERLINE_LIB_STATUS || {}).chart){
+        showBanner("warn", "Charts are hidden because the charting library couldn't be reached from the CDN. Everything else — KPIs, accounts, insights, transactions — is working normally. Reload with a working connection to restore charts.", "chartLibWarnBanner");
+      }
+    }
+  }).catch(function(){
+    $("#welcomeStatus2").textContent = "";
+  });
+}
+
+document.addEventListener("DOMContentLoaded", boot);
+
+})();
+</script>
+</body>
+</html>
