@@ -1,0 +1,4 @@
+# OPTIONAL. One PSX symbol per line.
+# Normally you can leave this empty: the job reads every stock on PSX's market-watch page.
+# If a stock you own ever shows "no price" in the dashboard (for example it isn't on that page),
+# add its symbol here and the job will look it up individually.
