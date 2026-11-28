@@ -77,16 +77,19 @@ def parse_timeseries(text):
 
 def fetch_single(symbol):
     for kind in ("int", "eod"):
+        url = "%s/timeseries/%s/%s" % (BASE, kind, symbol)
         try:
-            got = parse_timeseries(http_get("%s/timeseries/%s/%s" % (BASE, kind, symbol), retries=2))
-        except RuntimeError:
-            got = None
+            raw = http_get(url, retries=1, timeout=15)
+        except Exception as e:
+            print("  [%s %s] fetch error: %s" % (symbol, kind, e))
+            continue
+        got = parse_timeseries(raw)
         if got:
             asof = datetime.datetime.fromtimestamp(got[0], datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
             return {"price": round(got[1], 4), "basis": "intraday" if kind == "int" else "eod", "asOf": asof}
+        print("  [%s %s] parsed None; sample: %s" % (symbol, kind, raw[:180].replace("\n", " ")))
         time.sleep(0.4)
     return None
-
 
 def read_tickers(path):
     if not path:
