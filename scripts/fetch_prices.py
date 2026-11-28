@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
-Fetches the latest PSX share prices from the public PSX Data Portal
-(dps.psx.com.pk timeseries endpoints) for symbols listed in tickers.txt
-and writes them to a JSON file for the dashboard to read.
+Fetches the latest PSX share prices from https://dps.psx.com.pk/company/<SYMBOL>
+for symbols listed in tickers.txt and writes them to a JSON file for the
+dashboard to read.
 
   python3 fetch_prices.py OUTPUT.json [tickers.txt]
 
@@ -18,12 +18,13 @@ import sys
 import time
 import urllib.error
 import urllib.request
+from html.parser import HTMLParser
 
 BASE = "https://dps.psx.com.pk"
 HEADERS = {
-    "User-Agent": "Mozilla/5.0 (personal portfolio dashboard; one low-frequency request)",
-    "Accept": "application/json,text/plain,*/*;q=0.8",
-    "Accept-Language": "en",
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    "Accept-Language": "en-US,en;q=0.9",
 }
 SYMBOL_RE = re.compile(r"^[A-Z0-9][A-Z0-9.\-]{0,14}$")
 
@@ -54,42 +55,63 @@ def parse_number(text):
         return None
 
 
-def parse_timeseries(text):
-    """Latest (timestamp, price) from PSX's timeseries JSON; tolerant of layout and ordering."""
-    try:
-        obj = json.loads(text)
-    except ValueError:
+class CompanyQuoteParser(HTMLParser):
+    """Extracts quote__close, quote__name, and quote__sector from /company/<SYMBOL>."""
+
+    def __init__(self):
+        super().__init__(convert_charrefs=True)
+        self._stack = []
+        self._capture_cls = None
+        self._buf = []
+        self.close_text = None
+        self.name_text = None
+        self.sector_text = None
+
+    def handle_starttag(self, tag, attrs):
+        cls = dict(attrs).get("class", "") or ""
+        self._stack.append((tag, cls))
+        for target in ("quote__close", "quote__name", "quote__sector"):
+            if re.search(r"\b" + re.escape(target) + r"\b", cls) and self._capture_cls is None:
+                self._capture_cls = target
+                self._buf = []
+
+    def handle_data(self, data):
+        if self._capture_cls is not None:
+            self._buf.append(data)
+
+    def handle_endtag(self, tag):
+        if self._stack:
+            _, top_cls = self._stack.pop()
+            if self._capture_cls and re.search(r"\b" + re.escape(self._capture_cls) + r"\b", top_cls):
+                val = re.sub(r"\s+", " ", "".join(self._buf)).strip()
+                if self._capture_cls == "quote__close" and not self.close_text:
+                    self.close_text = val
+                elif self._capture_cls == "quote__name" and not self.name_text:
+                    self.name_text = val
+                elif self._capture_cls == "quote__sector" and not self.sector_text:
+                    self.sector_text = val
+                self._capture_cls = None
+                self._buf = []
+
+
+def fetch_company_quote(symbol):
+    url = "%s/company/%s" % (BASE, symbol)
+    html = http_get(url, retries=2, timeout=20)
+    parser = CompanyQuoteParser()
+    parser.feed(html)
+    price = parse_number(parser.close_text)
+    if price is None or price <= 0:
         return None
-    rows = obj.get("data") if isinstance(obj, dict) else obj
-    best = None
-    for r in rows or []:
-        if not isinstance(r, (list, tuple)) or len(r) < 2:
-            continue
-        ts, px = parse_number(r[0]), parse_number(r[1])
-        if ts is None or not px or px <= 0:
-            continue
-        if ts > 1e12:
-            ts /= 1000.0
-        if best is None or ts > best[0]:
-            best = (ts, px)
-    return best
+    entry = {
+        "price": round(price, 4),
+        "basis": "close",
+    }
+    if parser.name_text:
+        entry["name"] = parser.name_text
+    if parser.sector_text:
+        entry["sector"] = parser.sector_text
+    return entry
 
-
-def fetch_single(symbol):
-    for kind in ("int", "eod"):
-        url = "%s/timeseries/%s/%s" % (BASE, kind, symbol)
-        try:
-            raw = http_get(url, retries=1, timeout=15)
-        except Exception as e:
-            print("  [%s %s] fetch error: %s" % (symbol, kind, e))
-            continue
-        got = parse_timeseries(raw)
-        if got:
-            asof = datetime.datetime.fromtimestamp(got[0], datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-            return {"price": round(got[1], 4), "basis": "intraday" if kind == "int" else "eod", "asOf": asof}
-        print("  [%s %s] parsed None; sample: %s" % (symbol, kind, raw[:180].replace("\n", " ")))
-        time.sleep(0.4)
-    return None
 
 def read_tickers(path):
     if not path:
@@ -121,13 +143,18 @@ def main(argv):
 
     prices = {}
     for sym in tickers:
-        got = fetch_single(sym)
+        try:
+            got = fetch_company_quote(sym)
+        except Exception as e:
+            print("%s: fetch error (%s)" % (sym, e))
+            got = None
         print("%s: %s" % (sym, got["price"] if got else "no price found"))
         if got:
             prices[sym] = got
+        time.sleep(0.35)
 
     if not prices:
-        print("ERROR: could not fetch prices for any symbol in %s" % ticker_path)
+        print("ERROR: could not fetch prices for any symbol in tickers.txt")
         return 1
 
     result = {
