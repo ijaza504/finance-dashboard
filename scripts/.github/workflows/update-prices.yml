@@ -1,0 +1,35 @@
+name: Update PSX prices
+
+on:
+  schedule:
+    # every 10 minutes, Monday-Friday, 09:00-16:59 Pakistan time (04:00-11:59 UTC)
+    - cron: "*/10 4-11 * * 1-5"
+  workflow_dispatch:        # lets you run it by hand from the Actions tab
+
+permissions:
+  contents: write           # needed to publish prices.json to the 'prices' branch
+
+concurrency:
+  group: psx-prices
+  cancel-in-progress: false
+
+jobs:
+  fetch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Fetch prices from PSX
+        run: python3 scripts/fetch_prices.py /tmp/prices.json tickers.txt
+
+      - name: Publish to the 'prices' branch (a single commit, so history never grows)
+        run: |
+          git config user.name  "price-bot"
+          git config user.email "price-bot@users.noreply.github.com"
+          git checkout --orphan prices-publish
+          git rm -rf --quiet . || true
+          cp /tmp/prices.json prices.json
+          git add prices.json
+          git commit --quiet -m "PSX prices $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          git push --force origin HEAD:prices
