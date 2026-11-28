@@ -96,11 +96,20 @@ class CompanyQuoteParser(HTMLParser):
 
 def fetch_company_quote(symbol):
     url = "%s/company/%s" % (BASE, symbol)
-    html = http_get(url, retries=2, timeout=20)
+    try:
+        html = http_get(url, retries=1, timeout=20)
+    except Exception as e:
+        print("  [%s] http_get failed: %s" % (symbol, e))
+        return None
     parser = CompanyQuoteParser()
     parser.feed(html)
     price = parse_number(parser.close_text)
     if price is None or price <= 0:
+        title_m = re.search(r"<title[^>]*>(.*?)</title>", html, re.S | re.I)
+        title = re.sub(r"\s+", " ", title_m.group(1)).strip() if title_m else "no-title"
+        q_idx = html.find("quote__close")
+        snippet = re.sub(r"\s+", " ", html[max(0, q_idx - 60):q_idx + 140]).strip() if q_idx != -1 else "quote__close-not-in-raw-html"
+        print("  [%s] close_text=%r | title=%r | len=%d | raw=%s" % (symbol, parser.close_text, title, len(html), snippet))
         return None
     entry = {
         "price": round(price, 4),
@@ -111,7 +120,6 @@ def fetch_company_quote(symbol):
     if parser.sector_text:
         entry["sector"] = parser.sector_text
     return entry
-
 
 def read_tickers(path):
     if not path:
